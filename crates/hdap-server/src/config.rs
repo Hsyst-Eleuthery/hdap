@@ -2,14 +2,17 @@
 
 pub use hdap_core::pow::PowPolicy;
 
-/// A provisioned federation peer (out-of-band allowlist entry).
+/// A pre-provisioned federation peer (optional out-of-band pin).
 ///
-/// Membership is never TOFU (AME-34): the operator pins `node_id -> pubkey` and
-/// tells the node where to reach it. The `pubkey` is the peer's *persistent*
-/// Ed25519 verifying key (the `node_sign_pub` it publishes on `/health` and
-/// signs federation documents with). `endpoint` is `host:port`; `tls_pin` is
-/// the SHA-256 of the peer's cert DER, required for any non-loopback dialing
-/// (AME-37) so replicated plaintext never travels in the clear.
+/// Federation is open by design: any node may handshake and is trusted for its
+/// own id after the key it presents is pinned on first contact. This map lets an
+/// operator *strengthen* that by pre-pinning `node_id -> pubkey` and an endpoint
+/// out of band, so a later caller cannot claim the id with another key. The
+/// `pubkey` is the peer's *persistent* Ed25519 verifying key (the
+/// `node_sign_pub` it publishes on `/health` and signs federation documents
+/// with). `endpoint` is `host:port`; `tls_pin` is the SHA-256 of the peer's
+/// cert DER, required for any non-loopback dialing (AME-37) so replicated
+/// plaintext never travels in the clear.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FederationPeer {
     pub pubkey: String,
@@ -65,22 +68,15 @@ pub struct Config {
     pub rate_limit_burst: u32,
     /// Federation timestamp window tolerance (± seconds).
     pub fed_window_secs: i64,
-    /// Authorized federation peers: `node_id -> FederationPeer`.
+    /// Optional federation pins: `node_id -> FederationPeer`.
     ///
-    /// A handshake only admits a node whose id *and* key both match an entry,
-    /// so membership must be provisioned out of band (config file / signed
-    /// invite). An empty map is a closed federation: nobody self-registers.
-    /// TOFU is not safe when first contact is unauthenticated — the first
-    /// caller would become a trusted peer.
+    /// An empty map does **not** close the node. Federation is always open:
+    /// unknown peers are admitted on first contact and their presented key is
+    /// pinned. Entries here only pre-pin a key/endpoint so a later caller with
+    /// the same id but a different key is rejected. Content is still verified
+    /// against its author signature and hash, so an impostor can be reached but
+    /// cannot forge content (AME-34).
     pub federation_peers: std::collections::BTreeMap<String, FederationPeer>,
-    /// Open federation: accept a handshake from a node that is **not** in the
-    /// allowlist, pinning the pubkey it presents on first contact. This is a
-    /// deliberate convenience for dev/test and a self-hosted mesh where nodes
-    /// meet by address (`pyle-<base64(host:port)>`); it is a real downgrade
-    /// (a first caller becomes a trusted peer — exactly AME-34) and is **off**
-    /// by default. Content is still verified against its author signature and
-    /// hash, so an impostor can be reached but cannot forge content.
-    pub open_federation: bool,
 }
 
 impl Default for Config {
@@ -101,7 +97,6 @@ impl Default for Config {
             rate_limit_burst: 20,
             fed_window_secs: 30,
             federation_peers: std::collections::BTreeMap::new(),
-            open_federation: false,
             band_bytes_per_hour: 64 * 1024 * 1024,
             pow_strict_hashrate: false,
         }

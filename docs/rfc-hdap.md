@@ -4,7 +4,7 @@
 
 - **Status**: estável — release 1.0, implementado em `hdap-core`, `hdap-server`, `hdap-cli`, `hdap-tls` e `hdap-gui`.
 - **Última edição**: 2026-10-22.
-- **Objetivos de design**: armazenamento assinado e auditável sem registro global; identidade global com sessão por nó; custo antiabuso por prova de trabalho; federação de pares conhecidos primeiro; camada de mercado opcional (`katallaxia`).
+- **Objetivos de design**: armazenamento assinado e auditável sem registro global; identidade global com sessão por nó; custo antiabuso por prova de trabalho; federação aberta entre pyles; camada de mercado opcional (`katallaxia`).
 - **Documentos-fonte**: [especificacao-hdap.md](especificacao-hdap.md), [modelo-de-ameaca.md](modelo-de-ameaca.md), [lexico-grego.md](lexico-grego.md) e [filosofia-economica.md](filosofia-economica.md).
 - **Autoridade documental**: este RFC é normativo para o **formato de fio** (bytes, headers, rotas) e defere à [Especificação Formal](especificacao-hdap.md) para a semântica e ao [Modelo de Ameaça](modelo-de-ameaca.md) para a segurança.
 
@@ -33,12 +33,12 @@ Regra de ouro: chaves privadas **nunca saem do cliente**; o pyle só guarda chav
 
 ## 3. Federação e escopo deste documento
 
-HDAP define **dois modos**:
+HDAP distingue **dois recortes de governança econômica**, não dois modos de admissão de rede:
 
-1. **Fechado** (homospondoi de pares conhecidos) — alvo atual, totalmente implementado; consenso de reputação é maioria simples dos nós ativos.
-2. **Aberto** (rede pública) — *research*; voto de reputação pesa por `paratheke` (penhor), deleção é incentivo+reputação, nunca enforcement físico, e o OTP é propagado por sync (limitação de nós offline declarada).
+1. **Federado** (`homospondoi`) — alvo atual, totalmente implementado; a federação é sempre aberta (qualquer pyle faz o primeiro contato e tem a chave fixada), e o consenso de reputação é maioria simples dos nós ativos.
+2. **Mercado** (rede pública) — *research*; voto de reputação pesa por `paratheke` (penhor), deleção é incentivo+reputação, nunca enforcement físico, e o OTP é propagado por sync (limitação de nós offline declarada).
 
-Este documento especifica o modo fechado como MUST e descreve o aberto como doutrina.
+Este documento especifica a federação aberta como MUST e descreve o mercado como doutrina.
 
 ## 4. Identidade
 
@@ -214,7 +214,7 @@ e só então armazena. Reenviar a mesma capacidade é idempotente.
 ### 12.2 Federação (`/homospondoi`)
 | Método | Rota | Ação |
 |---|---|---|
-| POST | `/handshake` | registrar peer (`node_id` + pubkey + `endpoint` + opcional `tls_pin`) — **só se provisionado** na allowlist; devolve `node_sign_pub` |
+| POST | `/handshake` | registrar peer (`node_id` + pubkey + `endpoint` + opcional `tls_pin`) — sempre aceito; a chave é fixada no primeiro contato (ou conferida contra um pin prévio); devolve `node_sign_pub` |
 | POST | `/sync` | semicronia: content_hash + `otp_consumed` (piso OTP); **dispara replicação automática** de blobs ausentes |
 | GET | `/fetch_blob?hash=<content_hash>` | **replicação de conteúdo**: devolve bytes em plaintext (TLS) do blob cujo hash coincide; autenticação por headers `X-HDAP-*` |
 | GET | `/namespace?owner=<user_id>` | usuário (prosopeion/adeia/chaves) + entradas (`path`/`hash`/`size`) para pull-through |
@@ -231,11 +231,11 @@ O modelo de reputação varia por modo de federação (§3):
 
 | Modo | Decisão | Reconciliação quando divergir |
 |------|---------|-------------------------------|
-| **Fechado** (homospondoi de pares conhecidos) | Maioria simples dos nós ativos | **Regra de reconciliação obrigatória**: ao receber `/pheme` com score divergente, o nó **adota a mediana** dos scores recebidos dos peers ativos (incluindo o próprio). Se há `N` nós ativos, a mediana é o score na posição `⌊N/2⌋` ordenado. Empate: escolhe o menor. Isso garante convergência determinística sem coordinator e tolera até `⌊(N-1)/2⌋` nós bizantinos. |
+| **Federado** (homospondoi) | Maioria simples dos nós ativos | **Regra de reconciliação obrigatória**: ao receber `/pheme` com score divergente, o nó **adota a mediana** dos scores recebidos dos peers ativos (incluindo o próprio). Se há `N` nós ativos, a mediana é o score na posição `⌊N/2⌋` ordenado. Empate: escolhe o menor. Isso garante convergência determinística sem coordinator e tolera até `⌊(N-1)/2⌋` nós bizantinos. |
 | **Aberto** (rede pública) | Voto ponderado por `paratheke` (penhor) | Mesma regra: mediana ponderada por stake. Nós sem `paratheke` não votam. |
 
 **Propagação**: `POST /homospondoi/pheme` carrega `pheme_candidate.hdap` (assinado pelo proponente, com `TARGET_ID`, `SCORE_DELTA`, `REASON`, `EVIDENCE`, `PARATHEKE_COMMIT`). O nó receptor:
-1. Verifica assinatura do proponente contra `Config.federation_peers`.
+1. Verifica a assinatura do proponente contra a chave fixada para aquele `node_id` (o pin de `Config.federation_peers`, se existir, ou a chave aceita no handshake).
 2. Verifica evidência (hashes de `prytaneion`/`ktema`).
 3. Aplica `SCORE_DELTA` localmente.
 4. Encaminha para os outros peers (gossip com deduplicação por nonce).
@@ -243,9 +243,9 @@ O modelo de reputação varia por modo de federação (§3):
 
 **Garantia**: a regra da mediana é determinística, não requer coordinator e converge em uma rodada de gossip completa. Um nó que não aplique a regra terá seu `pheme.hdap` com hash divergente → detectado no próximo `/sync` → marca o nó como suspeito (`oneidos`).
 
-> **Membresia não é TOFU** (AME-34): `Config.federation_peers` fixa `node_id → {pubkey, endpoint, tls_pin}` fora de banda. O `/handshake` só retorna `200` quando id **e** chave casam com uma entrada; caso contrário `403` e nenhum peer é inserido. Allowlist vazia = federação fechada (ninguém se auto-registra). TOFU federado era vulnerável: o primeiro a alcançar o endpoint virava nó confiável. A exceção explícita `--open-federation` (`Config.open_federation`) reinstitui TOFU para dev/malha self-hosted onde os nós se acham por endereço; é downgrade consciente, desligado por padrão, e o conteúdo segue verificado por assinatura + hash.
+> **Federação aberta com pin no primeiro contato** (AME-34): todo `/handshake` é aceito. A chave apresentada é fixada em `State::peers` para aquele `node_id`; um id já fixado não aceita outra chave (`409`). `Config.federation_peers` (`node_id → {pubkey, endpoint, tls_pin}`) é um **reforço opcional**: se houver entrada, a chave precisa casar com ela. O conteúdo continua verificado por assinatura de autor e hash, então um impostor pode ser alcançado, mas não pode forjar conteúdo.
 
-**Descoberta global (`/homospondoi/directory`, `/homospondoi/announce`).** Com `--open-federation`, cada handshake bem-sucedido entra na bolha. A lista é sincronizada por digest canônico: `GET /directory?digest=` responde só o digest quando já há convergência; caso contrário devolve os pyles dialáveis. Um candidato só é inserido em `State::peers` depois de um handshake de callback que confirme `server_id`, chave de assinatura e pin. Anúncios usam fanout 2, `event_id` deduplicado e TTL ≤ 8; anti-entropy roda a cada 60 s contra 2 pares rotativos e o health check de um par a cada 5 min. Assim o custo é O(n) por rodada, não O(n²) de perguntas redundantes, e loops A→B→C→B→A morrem no `event_id`. Com allowlist estrita a descoberta fica desligada: um par confiável não pode ampliar a membrana sozinho.
+**Descoberta global (`/homospondoi/directory`, `/homospondoi/announce`).** Cada handshake bem-sucedido entra na bolha. A lista é sincronizada por digest canônico: `GET /directory?digest=` responde só o digest quando já há convergência; caso contrário devolve os pyles dialáveis. Um candidato só é inserido em `State::peers` depois de um handshake de callback que confirme `server_id`, chave de assinatura e pin. Anúncios usam fanout 2, `event_id` deduplicado e TTL ≤ 8; anti-entropy roda a cada 60 s contra 2 pares rotativos e o health check de um par a cada 5 min. Assim o custo é O(n) por rodada, não O(n²) de perguntas redundantes, e loops A→B→C→B→A morrem no `event_id`. A descoberta está sempre ativa: um par confiável pode apresentar um desconhecido, mas ele só entra após o handshake de callback.
 
 **Busca por hash, livro global e Cenário B.** `POST /resolve_hash` resolve pelo `pechys` sem URI: local → livro global (local + até 8 pares) → origem → réplicas; valida `sha256` e `sphragis` (pubkey/assinatura no livro e nos headers `X-HDAP-Origin-Pubkey`/`X-HDAP-Sphragis`/`X-HDAP-Origin-Path`), re-sela em `cache/<hash>/<name>` do requisitante e registra a réplica `server_id:owner/path`. O livro troca *digest-first*, funde de forma idempotente (origem first-writer-wins, réplicas/deleções unidas) e o handshake carrega `ledger_digest`. O `adeia` de cada namespace replicado é **congelado no pull** (`State.replica_acls`): réplicas públicas antigas continuam legíveis mesmo com a origem offline ou com edição mais restritiva — `authorize_replica` concede só `Read`; novas edições exigem transferência. `POST /house_move` verifica Ed25519 sobre `hdap:house_move:<user>:><pyle>:<sha256(properties)>:<sha256(adeia)>`, exige edição estritamente maior e propaga via `/homospondoi/house_move` (fanout 2). `GET /bubble` expõe as contagens que o GUI mostra no rodapé.
 
@@ -278,7 +278,7 @@ smuggling aqui é um bug de parser. Regras estritas:
 - `timi.hdap` = anúncio de preço por nó; `GET /timi` lista. 
 - Oferta: `obolos`/byte-tempo; `tokos` cresce com duração (preferência temporal).
 - Reputação (`pheme`) é capital; o penhor (`paratheke`) dá voz; `euthyne` = arbitragem privada.
-- O núcleo funciona sem o módulo (federação fechada).
+- O núcleo funciona sem o módulo.
 
 ## 14. Modelo de ameaça (sumário)
 
@@ -296,7 +296,7 @@ smuggling aqui é um bug de parser. Regras estritas:
 - `serve_tls` do daemon carrega a identidade do bundle `<data>/tls.identity` (fallback para o par legado `tls.crt`/`tls.key`, com migração automática); o pin é estável entre reinícios. Com `--ephemeral` a cert volta a ser gerada em memória (pin muda por boot), útil só em testes.
 - Rotação de `omphalos`: `POST /omphalos` (sessão do dono) com `SEED_ITER` monotônico; piso de replay zerado.
 - Sync de `pheme` com peers offline: fila `pendings` + retry com backoff ao reestabelecer; declara-se a janela de replay OTP = latência de sync (irredutível sem consenso global — §17.2).
-- Vetores de canonicalização: implementados como testes de roundtrip (parse/render) em `hdap-core`; suíte atual: **227 testes passando e 1 ignorado** (61 core, 68 server + 4 bin, 68 GUI, 19 CLI + 2 bin, 5 tls).
+- Vetores de canonicalização: implementados como testes de roundtrip (parse/render) em `hdap-core`; suíte atual: **228 testes passando e 1 ignorado** (61 core, 69 server + 4 bin, 68 GUI, 19 CLI + 2 bin, 5 tls).
 - Replicação para peer remoto usa **TLS com pin obrigatório** (`tls_pin` no `PeerRecord`); plaintext só é aceito em loopback (AME-37). Resposta de peer é lida com teto de tamanho, e o corpo para no `Content-Length` declarado em vez de esperar o peer fechar.
 - Parser HTTP: cabeçalho tem teto próprio (`MAX_HEAD_BYTES`, independente do `max_body`) e toda conexão aceita recebe deadline de leitura/escrita, para que um peer silencioso não segure uma thread (slowloris).
 

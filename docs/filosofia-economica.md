@@ -58,7 +58,7 @@
 | Pergunta | Resposta |
 |---|---|
 | **Se um nó é malicioso, apagar é impossível?** | É verdade, e o protocolo assume isso. O HDAP não alega enforcement físico; torna `lethe` **economicamente dominante**: reter um arquivo tombstoned é risco de `euthyne`, quebra de `paratheke` e `oneidos`, que reduz a renda futura. A reputação é o único "juiz", e funciona porque é capital. |
-| **Por que alguém guardaria de graça?** | Não guarda. `katallaxia` monetiza a guarda por `timi`, `obolos` e byte-tempo, com descoberta de mercado. Sem `katallaxia`, o protocolo continua legítimo para federação privada, em que os nós se guardam reciprocamente por `apographon`. |
+| **Por que alguém guardaria de graça?** | Não guarda. `katallaxia` monetiza a guarda por `timi`, `obolos` e byte-tempo, com descoberta de mercado. Sem `katallaxia`, o protocolo continua legítimo para uma malha de pyles que se guardam reciprocamente por `apographon`. |
 | **Como se evita o double-spend de PoW?** | O `mochthos` é custo **por nó** e por `proklesis`; o `syngraphe` consome o nonce e o desafio é de uso único. A capacidade autorizada é **declarada e recontada pelo nó destinatário**, seguindo a política local (recontagem, especificação §9.3). Sem registro global, vale a regra austríaca: o valor de um bilhete é a promessa de quem o assina. |
 | **O consenso de reputação não é vulnerável a Sybil?** | Em rede aberta, `pheme` **pesa por `paratheke`**: voz é stake. Em rede fechada, de conhecidos, a maioria simples basta. Os dois modos são explícitos, e o modo aberto não usa voto de usuário anônimo. |
 | **Os metadados públicos não vazam?** | Vazam, e isso é declarado. A publicidade da `stele` é **condição** da verificabilidade global. A mitigação de superfície é cifrar o `ktema` no cliente, não expor o trilho de acessos e usar URIs com `?hash=` para não depender de lookup por nome. |
@@ -73,7 +73,7 @@
 **NÃO é**:
 - Não é blockchain de contrato inteligente; `syngraphe` é uma `stele` assinada (determinística e auditável), não código executado.
 - Não tem "tabela de preços oficial", "consenso de preço" nem "oráculo".
-- Não substitui o núcleo: com ela desligada, HDAP segue 100% funcional (modo federação privada).
+- Não substitui o núcleo: com ela desligada, HDAP segue 100% funcional (federação aberta, sem mercado).
 
 ---
 

@@ -208,7 +208,7 @@ O módulo econômico opcional (`katallaxia`, `timi`, `tokos`, `paratheke`) permi
 
 ## 9. Federação: cópias com prova
 
-Quando dois pyles se conhecem, eles fazem um handshake assinado com nonce e janela de tempo. Em federação fechada, cada nó mantém uma allowlist `node_id → pubkey`. Em federação aberta (`--open-federation`), o primeiro contato é aceito por TOFU — útil para desenvolvimento, arriscado para produção.
+Quando dois pyles se conhecem, eles fazem um handshake assinado com nonce e janela de tempo. A federação é sempre aberta: o primeiro contato de um pyle desconhecido é aceito e a chave que ele apresenta é fixada. Uma entrada opcional em `federation_peers` (`node_id → {pubkey, endpoint, tls_pin}`) apenas reforça esse pin, para que o mesmo id não possa ser reivindicado depois com outra chave.
 
 A replicação funciona assim:
 
@@ -289,7 +289,7 @@ O rodapé da GUI mostra o resumo. O painel de diádosi usa essa lista para suger
 
 O `pheme` agrega sinais de comportamento. A pontuação de um nó é uma mediana dos scores observados pelos pares ativos, o que converge de forma determinística e tolera uma minoria bizantina.
 
-O HDAP **não** tem um tribunal global. Uma penalidade (`oneidos`) é um registro público que influencia escolhas futuras; ela não teleporta para o disco de ninguém nem executa uma sentença. Em uma federação fechada, o operador pode decidir cortar um nó. Em uma rede aberta, a reputação é um sinal — poderoso, mas não onipotente.
+O HDAP **não** tem um tribunal global. Uma penalidade (`oneidos`) é um registro público que influencia escolhas futuras; ela não teleporta para o disco de ninguém nem executa uma sentença. Como a federação é aberta, não existe uma lista de admissão que o operador possa podar. A reputação é um sinal — poderoso, mas não onipotente — e o corte de um par é uma decisão local de roteamento, não uma expulsão global.
 
 Essa distinção é importante para não vender o projeto como algo que ele não é.
 
@@ -305,7 +305,7 @@ Essa distinção é importante para não vender o projeto como algo que ele não
 | Documento | canonicalização + assinatura sobre bytes | ambiguidade de representação |
 | Conteúdo | hash + assinatura + AEAD | alteração de bytes e disco roubado |
 | Autorização | `adeia` + sessão autenticada | acesso indevido |
-| Federação | handshake assinado + allowlist | nó impostor em modo fechado |
+| Federação | handshake assinado + chave fixada no primeiro contato | nó reivindicando um id com outra chave |
 | Operação | persistência antes da resposta + limites de parser | perda de estado e smuggling |
 
 O parser HTTP é escrito à mão e tem limites estritos: cabeçalho máximo, corpo máximo, sem `Transfer-Encoding: chunked`, `CR` isolado recusado e `Content-Length` conflitante recusado. Isso não é paranoia decorativa; é a diferença entre um servidor e uma superfície de ataque.
@@ -323,7 +323,7 @@ Um nó de produção precisa de:
 - **backup** — banco + `tls.identity` + arquivos exportados;
 - **limites** — `--moira`, `--max-upload`, `--rate-limit`, `--band-per-hour`;
 - **endereço anunciado** — `--advertise` define o endereço público e o id padrão do nó; é obrigatório na prática quando o bind é `0.0.0.0`;
-- **federação fechada** — allowlist em vez de `--open-federation`;
+- **federação aberta** — o nó aceita o primeiro contato de qualquer pyle e fixa a chave apresentada; `federation_peers` é apenas um reforço opcional de pin;
 - **usuário dedicado** — o processo não precisa de root.
 
 O pin TLS é estável enquanto `tls.identity` existir. Se você perder esse arquivo, o nó gera um certificado novo e todos os clientes que fixaram o pin antigo passam a recusar a conexão. Isso é o comportamento correto: um pin que muda sozinho não seria um pin.
@@ -336,7 +336,7 @@ O servidor imprime o pin no stderr e o expõe em `/health`. Em produção, distr
 
 O projeto não pede confiança na maturidade. Ele mostra os testes:
 
-- **227 testes automatizados** (mais um teste manual de integração com nó real);
+- **228 testes automatizados** (mais um teste manual de integração com nó real);
 - testes de dois e três nós para federação, réplica, delete e sucessão;
 - testes de GUI que renderizam a interface em 960×640 e falham se um painel sair da tela;
 - testes de segurança para replay de OTP, pin incorreto, CR isolado, request smuggling e delete de peer não-originário;
@@ -355,7 +355,7 @@ O HDAP é federado, não uma blockchain. Não há consenso global, mineração d
 - criptografia em repouso não protege contra o operador do nó;
 - metadados são públicos;
 - deleção é incentivada, não fisicamente garantida;
-- federação aberta é experimental;
+- a federação é aberta por design; a primeira chave vista para um id é a que fica fixada;
 - a economia (`katallaxia`) é opcional e não é necessária para arquivar.
 
 Esses limites não são falhas escondidas. São decisões de escopo documentadas para que ninguém compre uma promessa que o protocolo não faz.

@@ -12,12 +12,13 @@
 //! pyle the bytes came from) and each fetched blob is entered in the local
 //! `prytaneion` with the real origin, so provenance survives the copy.
 //!
-//! Security: only provisioned peers are dialable (the allowlist, AME-34), the
-//! outbound call is signed with the node's persistent key, and every blob is
-//! re-hashed after transfer — a peer cannot substitute content. The request
-//! also names the user it is pulling for, and the source applies *that user's*
-//! view of the owner's `adeia` before listing or sending bytes: a mirror never
-//! receives content the requester could not read at the origin.
+//! Security: any pyle can be dialed by its address-derived id (federation is
+//! open, AME-34), the outbound call is signed with the node's persistent key,
+//! and every blob is re-hashed after transfer — a peer cannot substitute
+//! content. The request also names the user it is pulling for, and the source
+//! applies *that user's* view of the owner's `adeia` before listing or sending
+//! bytes: a mirror never receives content the requester could not read at the
+//! origin.
 
 use base64::Engine as _;
 use ed25519_dalek::{Signature as Ed25519Signature, Verifier, VerifyingKey};
@@ -565,9 +566,9 @@ impl MirrorModule {
     }
 
     /// Resolve a pyle id to a dialable peer record. Known peers come from the
-    /// handshake/allowlist; an endpoint-addressed id can be dialed directly,
-    /// but only when this node is explicitly in `open_federation` mode. On that
-    /// first contact we handshake so both sides pin each other's signing key.
+    /// handshake; an endpoint-addressed id is dialed directly, since federation
+    /// is always open. On that first contact we handshake so both sides pin
+    /// each other's signing key.
     fn ensure_peer(
         &self,
         node: &crate::node::Node,
@@ -579,15 +580,9 @@ impl MirrorModule {
         let Some(endpoint) = crate::pyle::endpoint_from_id(pyle) else {
             return Err(Response::json(
                 409,
-                json_err("unknown pyle: provision it in federation_peers and handshake first"),
+                json_err("unknown pyle: id is not endpoint-addressed and has not handshaked"),
             ));
         };
-        if !self.cfg.open_federation {
-            return Err(Response::json(
-                409,
-                json_err("unknown pyle: endpoint-addressed ids need --open-federation"),
-            ));
-        }
         let (node_id, sign_key) = self.outbound_identity(node);
         let self_endpoint = crate::node::discovery::own_endpoint(node);
         let body = serde_json::json!({
@@ -1403,18 +1398,17 @@ mod tests {
         }
 
         #[test]
-        fn open_federation_dials_an_endpoint_addressed_pyle_without_provisioning() {
+        fn federation_dials_an_endpoint_addressed_pyle_without_provisioning() {
             let owner = "jose_0123456789abcdef";
             let plain = b"sem provisionamento";
 
-            // Source pyle: names itself after the address it binds, and is open
-            // so it accepts a first handshake from a node it does not know.
+            // Source pyle: names itself after the address it binds; federation is
+            // always open, so it accepts a first handshake from an unknown node.
             let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             let endpoint = listener.local_addr().unwrap().to_string();
             let id_b = crate::pyle::id_from_endpoint(&endpoint);
             let node_b = Node::new(Config {
                 server_id: id_b.clone(),
-                open_federation: true,
                 ..Config::default()
             });
             node_b.state.lock().unwrap().node_sign_seed = [7u8; 32];
@@ -1430,7 +1424,6 @@ mod tests {
             let id_a = crate::pyle::id_from_endpoint("127.0.0.1:19999");
             let node_a = Node::new(Config {
                 server_id: id_a.clone(),
-                open_federation: true,
                 ..Config::default()
             });
             node_a.state.lock().unwrap().node_sign_seed = [9u8; 32];
@@ -1471,7 +1464,7 @@ mod tests {
         /// endpoint-addressed id with no pin must still reach it — the client
         /// probes plaintext and falls back to TLS-TOFU.
         #[test]
-        fn open_federation_dials_a_tls_endpoint_addressed_pyle() {
+        fn federation_dials_a_tls_endpoint_addressed_pyle() {
             let owner = "jose_0123456789abcdef";
             let plain = b"tls pull-through";
 
@@ -1483,7 +1476,6 @@ mod tests {
 
             let node_b = Node::new(Config {
                 server_id: id_b.clone(),
-                open_federation: true,
                 ..Config::default()
             });
             node_b.state.lock().unwrap().node_sign_seed = [7u8; 32];
@@ -1498,7 +1490,6 @@ mod tests {
             let id_a = crate::pyle::id_from_endpoint("127.0.0.1:19998");
             let node_a = Node::new(Config {
                 server_id: id_a,
-                open_federation: true,
                 ..Config::default()
             });
             node_a.state.lock().unwrap().node_sign_seed = [9u8; 32];
@@ -1587,7 +1578,6 @@ mod tests {
             let id_b = crate::pyle::id_from_endpoint(&endpoint);
             let node_b = Node::new(Config {
                 server_id: id_b.clone(),
-                open_federation: true,
                 ..Config::default()
             });
             node_b.state.lock().unwrap().node_sign_seed = [7u8; 32];
@@ -1610,7 +1600,6 @@ mod tests {
             let id_a = crate::pyle::id_from_endpoint("127.0.0.1:19997");
             let node_a = Node::new(Config {
                 server_id: id_a,
-                open_federation: true,
                 ..Config::default()
             });
             node_a.state.lock().unwrap().node_sign_seed = [9u8; 32];
@@ -1676,7 +1665,6 @@ mod tests {
             let id_b = crate::pyle::id_from_endpoint(&endpoint);
             let node_b = Node::new(Config {
                 server_id: id_b.clone(),
-                open_federation: true,
                 ..Config::default()
             });
             node_b.state.lock().unwrap().node_sign_seed = [7u8; 32];
@@ -1711,7 +1699,6 @@ mod tests {
             let id_a = crate::pyle::id_from_endpoint("127.0.0.1:19996");
             let node_a = Node::new(Config {
                 server_id: id_a,
-                open_federation: true,
                 ..Config::default()
             });
             node_a.state.lock().unwrap().node_sign_seed = [9u8; 32];
@@ -1763,7 +1750,6 @@ mod tests {
             let id_b = crate::pyle::id_from_endpoint(&endpoint_b);
             let node_b = Node::new(Config {
                 server_id: id_b.clone(),
-                open_federation: true,
                 ..Config::default()
             });
             {
@@ -1799,7 +1785,6 @@ mod tests {
             let id_a = crate::pyle::id_from_endpoint(&endpoint_a);
             let node_a = Node::new(Config {
                 server_id: id_a,
-                open_federation: true,
                 ..Config::default()
             });
             node_a.state.lock().unwrap().node_sign_seed = [9u8; 32];
@@ -1881,7 +1866,6 @@ mod tests {
             let id_b = crate::pyle::id_from_endpoint(&endpoint);
             let node_b = Node::new(Config {
                 server_id: id_b.clone(),
-                open_federation: true,
                 ..Config::default()
             });
             node_b.state.lock().unwrap().node_sign_seed = [7u8; 32];
@@ -1896,7 +1880,6 @@ mod tests {
             let id_a = crate::pyle::id_from_endpoint("127.0.0.1:19996");
             let node_a = Node::new(Config {
                 server_id: id_a,
-                open_federation: true,
                 ..Config::default()
             });
             node_a.state.lock().unwrap().node_sign_seed = [9u8; 32];
@@ -1972,7 +1955,6 @@ mod tests {
 
             let node_b = Node::new(Config {
                 server_id: id_b.clone(),
-                open_federation: true,
                 ..Config::default()
             });
             node_b.state.lock().unwrap().node_sign_seed = [7u8; 32];
@@ -2005,7 +1987,6 @@ mod tests {
         ) -> Node {
             let node_a = Node::new(Config {
                 server_id: "pyle-a".into(),
-                open_federation: true,
                 ..Config::default()
             });
             node_a.state.lock().unwrap().node_sign_seed = [9u8; 32];

@@ -7,12 +7,10 @@
 //! carry an event id and a TTL, so a node forwards each event at most once and
 //! the gossip cannot loop back through the mesh.
 //!
-//! Discovery is gated by `open_federation`: a node with a strict allowlist
-//! will not auto-admit a pyle just because a trusted peer vouched for it.
-//! Even in open mode a vouched pyle is only written to `State::peers` after a
-//! successful callback handshake whose `node_id`, signing key and TLS pin
-//! match the advertisement. A lying peer can therefore slow discovery down,
-//! but cannot inject an identity it does not control.
+//! Discovery is always enabled. A vouched pyle is only written to
+//! `State::peers` after a successful callback handshake whose `node_id`,
+//! signing key and TLS pin match the advertisement. A lying peer can therefore
+//! slow discovery down, but cannot inject an identity it does not control.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -470,9 +468,6 @@ impl DiscoveryModule {
 
     /// `POST /homospondoi/announce`.
     pub(crate) fn handle_announce(&self, node: &Node, req: &Request, from: &str) -> Response {
-        if !node.cfg.open_federation {
-            return Response::json(403, json_err("peer discovery is disabled"));
-        }
         let body = match require_json(&req.body) {
             Ok(v) => v,
             Err(e) => return e,
@@ -602,9 +597,6 @@ pub(crate) fn ingest_directory(
     base_event: &str,
     ttl: u8,
 ) {
-    if !node.cfg.open_federation {
-        return;
-    }
     let now = node.now();
     for value in peers {
         let Some(advert) = PeerAdvert::parse(value) else {
@@ -827,14 +819,13 @@ mod tests {
     use std::net::TcpListener;
     use std::thread;
 
-    fn spawn(open: bool) -> (Arc<Node>, String) {
+    fn spawn() -> (Arc<Node>, String) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let endpoint = format!("127.0.0.1:{port}");
         let id = crate::pyle::id_from_endpoint(&endpoint);
         let cfg = Config {
             server_id: id.clone(),
-            open_federation: open,
             rate_limit_per_sec: 0,
             require_entry_pow: false,
             require_content_signature: false,
@@ -887,9 +878,9 @@ mod tests {
     /// whole mesh.
     #[test]
     fn a_three_node_bubble_converges() {
-        let (a, ap) = spawn(true);
-        let (b, bp) = spawn(true);
-        let (c, cp) = spawn(true);
+        let (a, ap) = spawn();
+        let (b, bp) = spawn();
+        let (c, cp) = spawn();
         let (aa, ba, ca) = (advert(&a, &ap), advert(&b, &bp), advert(&c, &cp));
         add_known(&a, &ba);
         add_known(&b, &aa);
@@ -919,7 +910,7 @@ mod tests {
 
     #[test]
     fn inbound_contact_does_not_fake_a_verified_endpoint() {
-        let (node, _endpoint) = spawn(true);
+        let (node, _endpoint) = spawn();
         node.discovery.record_seen("pyle-inbound", 100);
         {
             let health = node.discovery.health_snapshot();
@@ -941,7 +932,7 @@ mod tests {
     /// and untrusted (repeated failures or no endpoint).
     #[test]
     fn bubble_counts_core_extended_and_untrusted() {
-        let (node, _endpoint) = spawn(true);
+        let (node, _endpoint) = spawn();
         let record = |id: &str, endpoint: &str| PeerRecord {
             node_id: id.to_string(),
             sign_pub_hex: "aa".repeat(32),
@@ -989,8 +980,8 @@ mod tests {
     /// rejected: the callback handshake is the vote, not the announcer's word.
     #[test]
     fn a_spoofed_advert_is_not_added() {
-        let (a, _ap) = spawn(true);
-        let (b, bp) = spawn(true);
+        let (a, _ap) = spawn();
+        let (b, bp) = spawn();
         let mut fake = advert(&b, &bp);
         fake.node_id = "pyle-impostor".to_string();
         fake.sign_pub_hex = "00".repeat(32);
@@ -1009,8 +1000,8 @@ mod tests {
 
     #[test]
     fn directory_answers_digest_only_when_equal() {
-        let (a, ap) = spawn(true);
-        let (b, bp) = spawn(true);
+        let (a, ap) = spawn();
+        let (b, bp) = spawn();
         add_known(&a, &advert(&b, &bp));
         add_known(&b, &advert(&a, &ap));
         let digest = directory_digest(&a);

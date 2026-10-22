@@ -156,16 +156,16 @@ O `OWNER` nos comandos de arquivo é o ID global (`$ID`), não apenas o nickname
 Para ver a federação funcionando na sua máquina, suba três nós em portas diferentes e três GUIs com cofres separados:
 
 ```bash
-./target/release/hdap-server --listen 127.0.0.1:8443 --data ./.dev/nodeA --open-federation &
-./target/release/hdap-server --listen 127.0.0.1:8444 --data ./.dev/nodeB --open-federation &
-./target/release/hdap-server --listen 127.0.0.1:8445 --data ./.dev/nodeC --open-federation &
+./target/release/hdap-server --listen 127.0.0.1:8443 --data ./.dev/nodeA &
+./target/release/hdap-server --listen 127.0.0.1:8444 --data ./.dev/nodeB &
+./target/release/hdap-server --listen 127.0.0.1:8445 --data ./.dev/nodeC &
 
 HDAP_HOME=./.dev/guiA ./target/release/hdap-gui &
 HDAP_HOME=./.dev/guiB ./target/release/hdap-gui &
 HDAP_HOME=./.dev/guiC ./target/release/hdap-gui &
 ```
 
-Registre uma identidade em cada nó e experimente replicação, permissões e mudança de casa. **`--open-federation` é uma opção de desenvolvimento**: ela aceita o primeiro contato de nós desconhecidos e não deve ser usada em produção.
+Registre uma identidade em cada nó e experimente replicação, permissões e mudança de casa. A federação é aberta por padrão: qualquer pyle pode fazer o primeiro contato e tem a chave que apresenta fixada nesse momento.
 
 ---
 
@@ -183,7 +183,7 @@ Um nó de produção precisa de três coisas: TLS, persistência e uma política
   --rate-limit 60
 ```
 
-TLS é obrigatório fora de loopback: o nó se recusa a subir em claro em endereço não local. O diretório `--data` deve apontar para um disco persistente e com backup. A `--moira` limita o armazenamento por usuário, e `0` significa ilimitado. O `--max-upload` limita o tamanho de cada arquivo, e o `--rate-limit` reduz abuso de conexões. O `--advertise` é o endereço público que os pares usam para chegar até você e também define o id padrão do nó (`pyle-<base64(advertise)>`); sem ele, um bind em `0.0.0.0` geraria um id inalcançável. Um `--id` explícito vence o `--advertise`. A federação fechada é o modo recomendado: nós conhecidos entram por allowlist, não por TOFU.
+TLS é obrigatório fora de loopback: o nó se recusa a subir em claro em endereço não local. O diretório `--data` deve apontar para um disco persistente e com backup. A `--moira` limita o armazenamento por usuário, e `0` significa ilimitado. O `--max-upload` limita o tamanho de cada arquivo, e o `--rate-limit` reduz abuso de conexões. O `--advertise` é o endereço público que os pares usam para chegar até você e também define o id padrão do nó (`pyle-<base64(advertise)>`); sem ele, um bind em `0.0.0.0` geraria um id inalcançável. Um `--id` explícito vence o `--advertise`. A federação é sempre aberta: qualquer pyle pode se apresentar e passa a ser conhecido com a chave fixada no primeiro contato; entradas em `federation_peers` apenas reforçam o pin de um par já conhecido.
 
 O processo não precisa de root. Rode com um usuário dedicado, mantenha o diretório de dados fora de `/tmp` e faça backup de `tls.identity` junto com o banco, porque sem ele o pin do nó muda. Detalhes de operação, systemd, firewall e recuperação estão no **[Guia do Usuário](docs/userguide6.md)** e no **[Manual Técnico](docs/tecnico.md)**.
 
@@ -200,13 +200,13 @@ Estes são os nós públicos operados pelo projeto. Use-os para publicar, replic
 | `pyle3.hdap.hsyst.org:8445` | `pyle-cHlsZTMuaGRhcC5oc3lzdC5vcmc6ODQ0NQ` |
 | `pyle.thais.fyi:8443` | `pyle-cHlsZS50aGFpcy5meWk6ODQ0Mw` |
 
-Um nó que se anuncia nesses endereços deve subir com `--listen 0.0.0.0:<porta> --advertise <endereço>`, para que o id derivado seja o endereço público, e não o bind curinga. A confiança continua vindo da assinatura de conteúdo, do hash e da allowlist — conhecer o endereço de um pyle não prova quem responde ali.
+Um nó que se anuncia nesses endereços deve subir com `--listen 0.0.0.0:<porta> --advertise <endereço>`, para que o id derivado seja o endereço público, e não o bind curinga. A confiança continua vindo da assinatura de conteúdo, do hash e da chave fixada no handshake — conhecer o endereço de um pyle não prova quem responde ali.
 
 ---
 
 ## Qualidade e verificação
 
-O HDAP é construído com testes antes de promessas. A suíte tem **227 testes automatizados** cobrindo núcleo, servidor, CLI, TLS e GUI, além de um teste manual de integração com nó real. Há **testes adversariais** para replay, OTP, pin errado, CR isolado, request smuggling, permissão negada, réplica divergente e delete não autorizado. Há **fuzzing** dos parsers de documento e de requisição HTTP. O **modelo de ameaça** tem 41 entradas `AME-*`, cada uma ligada a uma mitigação e, quando aplicável, a um teste. E o CI exige formatação e lint (`cargo fmt --check`, `cargo clippy -D warnings`) antes de qualquer merge.
+O HDAP é construído com testes antes de promessas. A suíte tem **228 testes automatizados** cobrindo núcleo, servidor, CLI, TLS e GUI, além de um teste manual de integração com nó real. Há **testes adversariais** para replay, OTP, pin errado, CR isolado, request smuggling, permissão negada, réplica divergente e delete não autorizado. Há **fuzzing** dos parsers de documento e de requisição HTTP. O **modelo de ameaça** tem 41 entradas `AME-*`, cada uma ligada a uma mitigação e, quando aplicável, a um teste. E o CI exige formatação e lint (`cargo fmt --check`, `cargo clippy -D warnings`) antes de qualquer merge.
 
 O objetivo não é dizer que o sistema é invulnerável — isso seria mentira. É garantir que cada garantia declarada tenha um mecanismo correspondente e um teste que tente quebrá-la.
 
@@ -214,7 +214,7 @@ O objetivo não é dizer que o sistema é invulnerável — isso seria mentira. 
 
 ## Limites honestos
 
-Nenhum sistema é soberano sem custo. Não existe recuperação central de senha: se você perder o `krypte.hdap` ou a senha, a identidade está perdida, e a única defesa é o backup. A criptografia em repouso protege o disco, não o operador: o nó precisa da chave mestra para servir os arquivos, e um operador com acesso total ao processo consegue lê-los. Os metadados são públicos por design, porque nomes, hashes e tamanhos fazem parte da verificação. A deleção é incentivo e reputação, não garantia física: um nó que já copiou o conteúdo pode tentar retê-lo, e o protocolo registra e penaliza, mas não teleporta para dentro do disco alheio. A federação aberta é experimental, e para produção se usa allowlist. E não há consenso global: o HDAP é federado, não uma blockchain, e a convergência é por documentos assinados e sincronização, não por votação global.
+Nenhum sistema é soberano sem custo. Não existe recuperação central de senha: se você perder o `krypte.hdap` ou a senha, a identidade está perdida, e a única defesa é o backup. A criptografia em repouso protege o disco, não o operador: o nó precisa da chave mestra para servir os arquivos, e um operador com acesso total ao processo consegue lê-los. Os metadados são públicos por design, porque nomes, hashes e tamanhos fazem parte da verificação. A deleção é incentivo e reputação, não garantia física: um nó que já copiou o conteúdo pode tentar retê-lo, e o protocolo registra e penaliza, mas não teleporta para dentro do disco alheio. A federação é aberta por design: o primeiro contato fixa a chave do par, e o conteúdo continua protegido por assinatura e hash. E não há consenso global: o HDAP é federado, não uma blockchain, e a convergência é por documentos assinados e sincronização, não por votação global.
 
 Esses limites estão documentados em detalhe no **[Modelo de Ameaça](docs/modelo-de-ameaca.md)**.
 

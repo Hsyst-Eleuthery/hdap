@@ -42,7 +42,7 @@ fn print_usage() {
             --listen ADDR:PORT   bind address (default 127.0.0.1:8443)\n  \
             --id SERVER_ID       node identifier (default: pyle-<base64(advertise or listen)>)\n  \
              --no-tls             plaintext HTTP (loopback/dev only)\n  \
-             --open-federation    accept handshakes from unknown nodes (TOFU; dev only)\n  \
+             --open-federation    accepted for compatibility; federation is always open\n  \
             --advertise ADDR:PORT  public address peers dial; also defines the default id\n  \
            --ephemeral          keep state in RAM only (no database file)\n  \
            --choregia BYTES     band bytes per mochthos (default 4194304)\n  \
@@ -82,7 +82,9 @@ fn parse_args() -> Args {
             "--listen" => out.listen = take_value(&mut args, "--listen"),
             "--id" => out.server_id = Some(take_value(&mut args, "--id")),
             "--no-tls" => out.no_tls = true,
-            "--open-federation" => out.cfg.open_federation = true,
+            // Federation is always open. The flag is kept as an accepted no-op
+            // so existing deployments that pass it keep booting.
+            "--open-federation" => {}
             "--advertise" => out.advertise = Some(take_value(&mut args, "--advertise")),
             "--data" => out.data_dir = take_value(&mut args, "--data"),
             "--ephemeral" => out.ephemeral = true,

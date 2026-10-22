@@ -10,7 +10,7 @@
 
 ## 1. Escopo e objetivo
 
-O **HDAP** (Hsyst Descentralized Archive Protocol) é um protocolo para **guardar arquivos assinados** (hash de integridade + assinatura do autor + registro auditável de origem) em uma rede de nós (`pyle`), em modo **federação fechada** (homospondoi de pares conhecidos) ou **rede pública** com camada de incentivos austríacos (`katallaxia`). Regra de ouro: todo `ktema` (arquivo) existe com (a) `pechys` (hash de integridade), (b) `sphragis` (assinatura do autor), (c) registro auditável de origem no `prytaneion` (matriz). Tudo o mais (permissões, transferência de posse, replicação, deleção, confiança) se apoia nesses três fatos.
+O **HDAP** (Hsyst Descentralized Archive Protocol) é um protocolo para **guardar arquivos assinados** (hash de integridade + assinatura do autor + registro auditável de origem) em uma rede de nós (`pyle`) em **federação aberta** (`homospondoi`), com uma camada opcional de incentivos austríacos (`katallaxia`). Regra de ouro: todo `ktema` (arquivo) existe com (a) `pechys` (hash de integridade), (b) `sphragis` (assinatura do autor), (c) registro auditável de origem no `prytaneion` (matriz). Tudo o mais (permissões, transferência de posse, replicação, deleção, confiança) se apoia nesses três fatos.
 
 **Fora de escopo (núcleo)**: DNS global, gait de execução de contrato, PHPS, "mineração de renda". Entram como módulos opcionais: `katallaxia` (economia austríaca), `kerux` (DDNS), `euthyne` (arbitragem privada).
 
@@ -265,7 +265,7 @@ BITS(claim) = clamp(ceil(log2(claim_hps × target_secs)), min_bits, max_bits)
 - Solicitada pelo usuário (ou matriz). Todos os nós listados apagam e **confirmam** ao `prytaneion`.
 - O nó apagador deixa um **`ostrakon`** (registro curto `LETHED_HASH`, `LETHED_AT`, `INITIATOR`) — **exílio do conteúdo**. O conteúdo binário é apagado; o ostrakon é só o marcador.
 - **Nó que não apaga**: falha evidenciada no `prytaneion` → `oneidos` (queda de `pheme`) e, em modo público, acionamento de `euthyne` com quebra de `paratheke`.
-- **Limite declarado**: deleção **não é enforcement físico**; é **incentivo econômico + reputação** (a filosofia econômica da §`katallaxia` faz reter o tombstoned sair caro). Em federação fechada, confia-se nos pares.
+- **Limite declarado**: deleção **não é enforcement físico**; é **incentivo econômico + reputação** (a filosofia econômica da §`katallaxia` faz reter o tombstoned sair caro). Como a federação é aberta, a retenção depende de reputação e de incentivos, não de confiança prévia entre operadores.
 
 ### 10.5 Integridade
 - Hash e `sphragis` sempre verificados no servidor (ler, replicar, propagar).
@@ -320,14 +320,14 @@ O mecanismo é estrutural, não textual: `State::ceessions[cedente] = [{to, path
 
 ## 12. Reputação distribuída (`pheme`) — por modo
 
-- `/HDAP_PHEME/pheme.hdap`: mesmo conteúdo e mesmo hash em todos os nós da federação **fechada**, validado a cada propagação.
+- `/HDAP_PHEME/pheme.hdap`: mesmo conteúdo e mesmo hash em todos os nós da federação, validado a cada propagação.
 - Entradas: `TARGET_ID` (prosopeion ou pyle), `SCORE_DELTA`, `REASON`, `EVIDENCE` (hashes), `OTP_CONSUMED` (para o §7.2 anti-replay OTP).
 - Atualização: `pheme_candidate.hdap` assinado pelo proponente; nós verificam evidência e aplicam.
 
 **Modos:**
 | Modo | Consenso | Voto | Uso |
 |---|---|---|---|
-| **Fechado** (homospondoi de pares conhecidos) | Maioria simples dos nós ativos | Nós com direito a voto | Federação privada |
+| **Federado** (homospondoi) | Maioria simples dos nós ativos | Nós com direito a voto | Malha de pyles que se conhecem |
 | **Aberto** (rede pública) | Peso por `paratheke` (stake) | Só quem **penhorou** tem voz | Rede pública global — voto anônimo não pesa → anti-Sybil econômico |
 
 - Ex.: nó que não apagou `lethe` — matriz recebe edição removendo score com motivo; nós verificam e atualizam `pheme` local + avisam vizinhos.
@@ -388,7 +388,7 @@ O mecanismo é estrutural, não textual: `State::ceessions[cedente] = [{to, path
 
 Headers estilo HPS: `X-HDAP-*` + assinatura + nonce + timestamp ±30 s, nonce replay TTL.
 
-> **Membresia por allowlist, não TOFU** (AME-34): `Config.federation_peers` (`node_id → {pubkey, endpoint, tls_pin}`) é provisionada fora de banda. `/homospondoi/handshake` admite um peer **somente** se id e chave casarem com uma entrada; senão responde `403` e não altera `peers`. Allowlist vazia = federação fechada — **exceto** com `--open-federation` (`Config.open_federation`), que aceita o primeiro contato por TOFU pinando a chave apresentada: downgrade explícito para dev/malha self-hosted, desligado por padrão. Mesmo aberto, o conteúdo continua verificado por assinatura + hash.
+> **Federação aberta com pin no primeiro contato** (AME-34): `/homospondoi/handshake` admite qualquer pyle. Se `Config.federation_peers` (`node_id → {pubkey, endpoint, tls_pin}`) tiver uma entrada para o id, a chave apresentada precisa casar com ela; caso contrário, a chave apresentada é fixada em `State::peers` e o par passa a ser conhecido. Um id já fixado não aceita outra chave (`409`). `federation_peers` é, portanto, um reforço opcional de pin, não uma lista de admissão. O conteúdo continua verificado por assinatura de autor e hash, então um impostor pode ser alcançado, mas não pode forjar conteúdo.
 
 **Descoberta global de pyles (bolha).** Todo handshake bem-sucedido entra em `State::peers` e é um candidato a gossip. A troca é *digest-first*: cada nó calcula `SHA-256` canônico sobre `(node_id, endpoint, sign_pub_hex, tls_pin)` ordenados; `GET /homospondoi/directory?digest=` devolve apenas `{digest}` quando o chamador já tem a mesma lista, e a lista completa só quando diverge. O handshake também devolve o diretório quando o digest do chamador difere, então o primeiro contato já semeia ambos os lados sem uma segunda rodada.
 
@@ -399,7 +399,7 @@ Um pyle novo só é aceito depois de um **handshake de callback** ao endpoint an
 - health check de um par a cada 5 min e verificação completa apenas de candidatos novos;
 - fila e lista limitadas (`MAX_JOBS`/`MAX_KNOWN_PEERS`), TTL de dedup de 10 min.
 
-A descoberta automática só roda com `--open-federation`; com allowlist estrita um peer confiável não pode admitir um desconhecido no seu lugar. Nós convergem para a mesma lista de pyles **dialáveis** (endpoint não vazio); falhas viram `PeerHealth` local, não removem o registro histórico. `--advertise ADDR:PORT` define o endereço público e o id padrão do nó (`pyle-<base64(advertise)>`); sem ele, o id vem de `--listen`, e um bind curinga produziria um id inalcançável.
+A descoberta automática está sempre ativa; um par confiável pode apresentar um desconhecido, mas ele só entra depois do handshake de callback. Nós convergem para a mesma lista de pyles **dialáveis** (endpoint não vazio); falhas viram `PeerHealth` local, não removem o registro histórico. `--advertise ADDR:PORT` define o endereço público e o id padrão do nó (`pyle-<base64(advertise)>`); sem ele, o id vem de `--listen`, e um bind curinga produziria um id inalcançável.
 
 **Replicação automática (§10.3):** ao receber `/homospondoi/sync` com `content_hash` que o nó ainda não possui, o nó dispara `GET /homospondoi/fetch_blob?hash=...` no peer remetente, verifica o hash, cifra com sua `master_key` local e registra no `prytaneion` como réplica. A replicação usa a chave de assinatura do nó (`node_sign_seed`) para autenticar a requisição de saída.
 
@@ -415,7 +415,7 @@ Uma URI de acesso `HDAP!<pyle>@<user>/<path>` pode nomear outro pyle. Em vez de 
 | POST | `/house_move` | sessão obrigatória; aplica uma transferência de casa já assinada pelo usuário (`adeia` de edição maior) e propaga aos pares |
 | POST | `/diadosi` | sessão obrigatória; instala `diadosi.hdap` assinado pelo dono (procuração de sucessão + hashes/edição atuais) |
 
-Fluxo do espelhamento: `GET /homospondoi/namespace?owner=` no par → para cada entrada, `GET /homospondoi/fetch_blob?hash=` (ignora `pow/*`), re-verifica `sha256`, re-sela sob o `master_key` local e grava sob o **mesmo** `owner`. Cada réplica entra no `prytaneion` com a origem real; o pyle de origem é registrado no livro de conhecidos (`State::peers`) e em `State::mirrors`. A operação é **idempotente** (segunda chamada copia 0). Um pyle desconhecido **não** é dialável pela allowlist; um id endereçado (`pyle-<base64url(host:port)>`) só é dialado com `--open-federation`, fazendo handshake antes do pull. `POST /resolve` é o único ponto de replicação iniciado pelo **leitor**, fechando a lacuna de quem nunca sincroniza ativamente.
+Fluxo do espelhamento: `GET /homospondoi/namespace?owner=` no par → para cada entrada, `GET /homospondoi/fetch_blob?hash=` (ignora `pow/*`), re-verifica `sha256`, re-sela sob o `master_key` local e grava sob o **mesmo** `owner`. Cada réplica entra no `prytaneion` com a origem real; o pyle de origem é registrado no livro de conhecidos (`State::peers`) e em `State::mirrors`. A operação é **idempotente** (segunda chamada copia 0). Qualquer pyle é dialável: um id endereçado (`pyle-<base64url(host:port)>`) é resolvido pelo próprio endereço e faz handshake antes do pull. `POST /resolve` é o único ponto de replicação iniciado pelo **leitor**, fechando a lacuna de quem nunca sincroniza ativamente.
 
 **Busca por hash e livro global (`resolve_hash` + `ledger`).** O leitor que só conhece o `pechys` usa `POST /resolve_hash`: o nó procura o blob local autorizado, depois consulta o **livro global** local e até 8 pares (`GET /homospondoi/ledger?hash=`), e por fim tenta a origem e as réplicas anotadas. Cada download é verificado contra o hash; a proveniência vem dos headers `X-HDAP-Origin-Pubkey`/`X-HDAP-Sphragis`/`X-HDAP-Origin-Path` do `fetch_blob`, do próprio livro, ou de `GET /prytaneion?hash=` na origem. A `sphragis` é verificada contra a pubkey de origem; assinatura inválida descarta a fonte, ausência (conteúdo legado) é aceita com `verified:false`. O blob é re-selado sob o `master_key` local em `cache/<hash>/<basename>` do **requisitante**, sujeito à quota `moira_bytes`, e a réplica `server_id:owner/path` entra no livro. O livro (`ledger.rs`) é trocado *digest-first* como o diretório, tem merge idempotente/comutativo, origem "first writer wins", réplicas/deleções unidas e teto de 4096 entradas; o handshake carrega `ledger_digest` e um mismatch agenda o pull.
 
@@ -429,7 +429,7 @@ Fluxo do espelhamento: `GET /homospondoi/namespace?owner=` no par → para cada 
 
 **Transferência de casa (`house_move`).** Quando a origem cai, o usuário conectado a um pyle conhecido usa a ação explícita **“mudar casa”** na GUI (ou a rota direta) e assina `hdap:house_move:<user>:><pyle>:<sha256(properties)>:<sha256(adeia)>` com sua chave e envia `POST /house_move`. O nó verifica a assinatura Ed25519, exige `adeia.edition` **estritamente maior** que a instalada, escreve `users`/`prosopeion.hdap`/`adeia.hdap`/`permissions` e propaga a mesma transferência (fanout 2, TTL ≤ 3) via `POST /homospondoi/house_move`. Sem manifestação assinada do usuário, o conteúdo novo continua indisponível; o público antigo segue pelo snapshot acima.
 
-**Nomes de pyle por endereço:** o `server_id` default é `pyle-<base64url(host:port)>` (`crates/hdap-server/src/pyle.rs`), então a própria URI carrega o endereço e o par pode ser dialado sem registro externo; `--id` sobrescreve. O id atesta **localização**, não identidade: a confiança no conteúdo vem da `sphragis` + hash, e a do peer da allowlist (ou do modo aberto explícito).
+**Nomes de pyle por endereço:** o `server_id` default é `pyle-<base64url(host:port)>` (`crates/hdap-server/src/pyle.rs`), então a própria URI carrega o endereço e o par pode ser dialado sem registro externo; `--id` sobrescreve. O id atesta **localização**, não identidade: a confiança no conteúdo vem da `sphragis` + hash, e a do peer da chave fixada no primeiro handshake.
 
 ### 14.4 Sincronia com peers offline (`pheme`/`otp_consumed`)
 - **`pendings`**: fila de `pheme_candidate`/`OTP_CONSUMED` não confirmada pelo destino; ao reestabelecer o peer, drena em ordem (FIFO) e confirma.
@@ -461,7 +461,7 @@ Fluxo do espelhamento: `GET /homospondoi/namespace?owner=` no par → para cada 
   3. **Reputação é capital (`pheme`):** cumprir `lethe` e contratos gera renda; violar destrói capital (`oneidos`).
   4. **Voz = stake (`paratheke`):** rede aberta vota em reputação só com penhor.
   5. **Arbitragem privada (`euthyne`):** disputas resolvidas por árbitros escolhidos; executa penhor + fame.
-- **O que não é:** blockchain de contrato, tabela oficial de preços, oráculo, substituição do núcleo. Módulo opcional; o núcleo funciona sem ele (modo federação fechada).
+- **O que não é:** blockchain de contrato, tabela oficial de preços, oráculo, substituição do núcleo. Módulo opcional; o núcleo funciona sem ele.
 
 ### Interação com o núcleo
 | Núcleo | Katallaxia adiciona |

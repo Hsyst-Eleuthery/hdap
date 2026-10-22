@@ -20,7 +20,7 @@ Primeira release de produção do HDAP. Codinome de protocolo: **Themelio**. Cod
 
 - API HTTP/1.1 sobre TLS auto-assinado persistido (`tls.identity`) e pinning TOFU.
 - Persistência SQLite com WAL, `synchronous=FULL` e gravação antes da resposta.
-- Federação fechada por allowlist e modo aberto explícito para desenvolvimento.
+- Federação aberta por design: todo pyle pode fazer o primeiro contato e tem a chave apresentada fixada em `State::peers`; `federation_peers` funciona como pin opcional e `--open-federation` é aceito apenas por compatibilidade.
 - Replicação verificada, notificação de deleção e proteção contra delete de peer não-originário.
 - Limites de parser, rate limit, quota por usuário e teto de upload.
 - Recusa de TLS desligado fora de loopback.
@@ -50,7 +50,7 @@ Primeira release de produção do HDAP. Codinome de protocolo: **Themelio**. Cod
 
 ### Qualidade
 
-- 227 testes automatizados + 1 teste manual de integração.
+- 228 testes automatizados + 1 teste manual de integração.
 - Modelo de ameaça com 41 entradas `AME-*`.
 - Fuzzing dos parsers de documento e HTTP.
 - CI com formatação, lint, build, testes e auditoria de dependências.

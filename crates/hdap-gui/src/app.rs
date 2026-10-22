@@ -3439,7 +3439,6 @@ mod tests {
         let pyle_id = hdap_server::pyle::id_from_endpoint(&format!("127.0.0.1:{port}"));
         let cfg = hdap_server::Config {
             server_id: pyle_id.clone(),
-            open_federation: true,
             choregia_per_mochthos: 1024 * 1024,
             pow: hdap_core::pow::PowPolicy::new(4, 1, 6),
             require_entry_pow: false,

@@ -110,9 +110,9 @@ Para ver a federação funcionando, suba três pyles e três GUIs com cofres sep
 ```bash
 cargo build --release --workspace
 
-./target/release/hdap-server --listen 127.0.0.1:8443 --data ./.dev/nodeA --open-federation &
-./target/release/hdap-server --listen 127.0.0.1:8444 --data ./.dev/nodeB --open-federation &
-./target/release/hdap-server --listen 127.0.0.1:8445 --data ./.dev/nodeC --open-federation &
+./target/release/hdap-server --listen 127.0.0.1:8443 --data ./.dev/nodeA &
+./target/release/hdap-server --listen 127.0.0.1:8444 --data ./.dev/nodeB &
+./target/release/hdap-server --listen 127.0.0.1:8445 --data ./.dev/nodeC &
 
 HDAP_HOME=./.dev/guiA ./target/release/hdap-gui &
 HDAP_HOME=./.dev/guiB ./target/release/hdap-gui &
@@ -121,7 +121,7 @@ HDAP_HOME=./.dev/guiC ./target/release/hdap-gui &
 
 Cada GUI usa um cofre diferente. Registre uma identidade em cada nó e experimente replicação, permissões e mudança de casa.
 
-> `--open-federation` é uma opção de **desenvolvimento**: aceita o primeiro contato de nós desconhecidos por TOFU. Em produção, use federação fechada.
+> A federação é sempre aberta: cada nó aceita o primeiro contato de outro pyle e fixa a chave apresentada. `--open-federation` continua aceito apenas por compatibilidade e não muda nada.
 
 Para derrubar os processos no fim do teste, referencie-os pelo PID ou pelo nome exato do binário — nunca por um padrão largo que possa atingir outros processos.
 

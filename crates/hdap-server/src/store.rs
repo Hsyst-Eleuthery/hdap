@@ -110,8 +110,10 @@ pub struct PrytaneionEntry {
     pub created_at: u64,
 }
 
-/// A federated peer we have handshaken with. Membership is provisioned out of
-/// band (pinned `node_id -> pubkey` allowlist), not first-come TOFU.
+/// A federated peer we have handshaken with. Federation is always open: the
+/// first handshake pins `node_id -> pubkey`; an operator may pre-pin the same
+/// pair out of band to reject a later caller that reuses the id with a
+/// different key.
 ///
 /// `endpoint` is the peer's host:port for outbound replication dialing.
 /// `tls_pin` is the SHA-256 of the peer's TLS cert DER (for pinning).

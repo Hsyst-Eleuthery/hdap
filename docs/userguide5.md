@@ -17,6 +17,8 @@ Muitos sistemas se dizem descentralizados porque têm vários servidores. Mas se
 
 Isso não significa que os nós sejam ilhas. Eles conversam, trocam digests, replicam conteúdo e convergem para o mesmo estado. A diferença é que a convergência acontece por acordo verificável, não por obediência a um coordenador. Dois pyles podem discordar por alguns segundos, e a rede não quebra; eles se sincronizam e voltam ao mesmo ponto. Essa tolerância à divergência temporária é o que torna a federação robusta.
 
+A federação é aberta por padrão. Qualquer pyle pode fazer o primeiro contato com qualquer outro e, nesse momento, a chave de assinatura que ele apresenta é fixada. Não existe lista de admissão: a confiança é construída sobre o que o nó prova depois, com assinaturas e hashes. O preço dessa abertura é que o primeiro contato precisa chegar ao nó certo; por isso, quando isso importa, confira o pin TLS e o id que o operador publicou.
+
 A federação também é assimétrica em relação ao poder. Um operador pode recusar conteúdo, pode cobrar caro, pode desligar o servidor. O que ele não pode é falsificar uma assinatura, apagar a história de outro nó ou impedir que você leve a sua identidade para outro lugar. O poder de cada operador é real, mas é local e limitado. É exatamente o oposto de uma plataforma central, em que o poder é global e ilimitado.
 
 ---

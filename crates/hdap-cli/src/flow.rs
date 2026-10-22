@@ -1386,7 +1386,6 @@ mod tests {
             pow: hdap_core::pow::PowPolicy::new(4, 1, 6),
             require_entry_pow: false,
             require_content_signature: false,
-            open_federation: true,
             rate_limit_per_sec: 0,
             ..hdap_server::Config::default()
         };

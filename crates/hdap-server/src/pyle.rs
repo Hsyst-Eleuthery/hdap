@@ -14,8 +14,8 @@
 //!
 //! The id certifies *location*, not identity: reaching the endpoint proves
 //! nothing about who answers there. Content trust still comes from the author
-//! signature and the content hash, and peer trust from the allowlist (or the
-//! explicit `open_federation` dev mode).
+//! signature and the content hash, and peer trust from the key pinned on first
+//! handshake (federation is always open).
 
 use base64::Engine;
 

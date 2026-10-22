@@ -57,7 +57,9 @@ impl FederationModule {
         }
     }
 
-    /// `POST /homospondoi/handshake` — register a peer (allowlist in config, no TOFU).
+    /// `POST /homospondoi/handshake` — register a peer. Federation is always
+    /// open: an unknown node is admitted and its key pinned on first contact;
+    /// a pre-provisioned entry only adds an out-of-band pin.
     fn fed_handshake(&self, node: &crate::node::Node, req: &Request) -> Response {
         let body = match require_json(&req.body) {
             Ok(v) => v,
@@ -68,16 +70,15 @@ impl FederationModule {
         if node_id.is_empty() || hex::decode(pubkey_hex).map(|v| v.len()) != Ok(32) {
             return Response::json(400, json_err("node_id + 32-byte hex pubkey required"));
         }
-        // Allowlist is mandatory by default (Crítica 1); `open_federation`
-        // opts into TOFU pinning of a first caller for dev/self-hosted meshes.
+        // Federation is always open. A pre-provisioned entry only strengthens
+        // the pin: if the operator fixed a key, a different one is rejected.
+        // Otherwise the first presented key is pinned below in `state.peers`.
         let expected = self.cfg.federation_peers.get(node_id);
         if let Some(expected) = expected {
             // Crítica 2: verify the presented pubkey matches the configured one
             if expected.pubkey != pubkey_hex {
                 return Response::json(403, json_err("pubkey does not match allowlist"));
             }
-        } else if !self.cfg.open_federation {
-            return Response::json(403, json_err("peer not in federation allowlist"));
         }
         let configured = self.cfg.federation_peers.get(node_id);
         // The configured endpoint wins (provisioned out of band); a peer may
@@ -1117,6 +1118,40 @@ mod tests {
                 .objects
                 .contains_key(&State::key(owner, path)),
             "the replica must survive a non-origin deletion"
+        );
+    }
+
+    /// Federation is open by design: a node that was never provisioned is
+    /// admitted on its first handshake, and the key it presents is pinned.
+    #[test]
+    fn federation_admits_and_pins_an_unknown_peer() {
+        let (node, _now) = Node::with_clock_and_now(Config::default(), 1000);
+        let seed = [9u8; 32];
+        let pub_hex = hex::encode(
+            ed25519_dalek::SigningKey::from_bytes(&seed)
+                .verifying_key()
+                .to_bytes(),
+        );
+        let peer_id = crate::pyle::id_from_endpoint("127.0.0.1:9443");
+        let body = serde_json::json!({
+            "node_id": peer_id,
+            "pubkey": pub_hex,
+            "endpoint": "127.0.0.1:9443",
+        })
+        .to_string();
+        let req = Request {
+            method: "POST".to_string(),
+            path: "/homospondoi/handshake".to_string(),
+            query: BTreeMap::new(),
+            headers: BTreeMap::new(),
+            body: body.into_bytes(),
+        };
+        let r = node.federation.handle_fed(&node, &req);
+        assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(&r.body));
+        let st = node.state.lock().unwrap();
+        assert_eq!(
+            st.peers.get(&peer_id).map(|p| p.sign_pub_hex.as_str()),
+            Some(pub_hex.as_str())
         );
     }
 }
