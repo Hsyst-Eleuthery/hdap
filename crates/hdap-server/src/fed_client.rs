@@ -1,9 +1,10 @@
 //! Minimal HTTP/1.1 client for outbound federation calls (replication).
 //!
 //! Transport policy: a peer configured with a `tls_pin` is contacted over TLS
-//! with that pin enforced (AME-37). Plaintext is refused unless the peer is
-//! loopback, so a replicated blob can never travel in cleartext to a remote
-//! node just because a pin was omitted.
+//! with that pin enforced (AME-37). Without a pin, a remote peer is contacted
+//! over TLS in TOFU mode — never in cleartext — so a replicated blob cannot
+//! travel in the clear to a remote node just because a pin was omitted. Only a
+//! loopback peer is ever probed in plaintext (for a `--no-tls` dev node).
 
 use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
@@ -65,17 +66,11 @@ impl FedHttpClient {
         })
     }
 
-    /// Plaintext is only ever allowed towards loopback (AME-37): replication
-    /// moves whole plaintext blobs, so a missing pin must not silently
-    /// downgrade a remote peer to cleartext.
-    fn require_transport_ok(&self) -> io::Result<()> {
-        if self.tls_pin.is_some() || is_loopback_host(&self.host) {
-            return Ok(());
-        }
-        Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "refusing plaintext federation to a remote peer without a tls_pin",
-        ))
+    /// Cleartext is only ever allowed towards loopback (AME-37): replication
+    /// moves whole plaintext blobs, so a remote peer is always dialed over TLS
+    /// (pinned, or TOFU when the endpoint-addressed id carries no pin).
+    fn cleartext_probe_allowed(&self) -> bool {
+        is_loopback_host(&self.host)
     }
 
     fn endpoint(&self) -> String {
@@ -134,13 +129,12 @@ impl FedHttpClient {
     /// Send a prebuilt request and read the reply.
     ///
     /// Transport: a configured pin means TLS-with-pin, full stop. Without a pin
-    /// the peer must be loopback (AME-37). An endpoint-addressed peer carries
-    /// no pin, so the scheme is unknown: try plaintext first (fast for a
-    /// `--no-tls` peer) and, if that yields no parseable status line, retry
-    /// over TLS in TOFU mode (accept the presented certificate). This is how a
-    /// derived `pyle-<base64(host:port)>` id reaches a peer that runs TLS.
+    /// a remote peer is dialed over TLS in TOFU mode — an endpoint-addressed
+    /// peer (`pyle-<base64(host:port)>`) carries no pin, and an open federation
+    /// must not ship a request in cleartext off the host. Only a loopback peer
+    /// gets the fast plaintext probe (for a `--no-tls` dev node), falling back
+    /// to TLS TOFU if that yields no parseable status line.
     fn send(&self, request: &[u8]) -> io::Result<HttpResponse> {
-        self.require_transport_ok()?;
         if let Some(pin) = &self.tls_pin {
             let tcp = self.connect_tcp()?;
             let mut stream = hdap_tls::connect(
@@ -155,6 +149,13 @@ impl FedHttpClient {
         // Already learned this peer speaks TLS: skip straight to it.
         if self.peer_tls.load(std::sync::atomic::Ordering::Relaxed) {
             return self.tls_tofu(request);
+        }
+        // No pin, remote: TLS TOFU directly, so nothing leaves in cleartext.
+        if !self.cleartext_probe_allowed() {
+            let resp = self.tls_tofu(request)?;
+            self.peer_tls
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            return Ok(resp);
         }
         // No pin, loopback: probe plaintext first with a short read deadline
         // (a TLS peer would otherwise hold the read until the full IO timeout).
@@ -443,16 +444,15 @@ mod tests {
         }
     }
 
-    /// AME-37: a remote peer without a pin must not be contacted in cleartext.
+    /// AME-37: a remote peer without a pin is not contacted in cleartext; it
+    /// goes straight to TLS TOFU, so nothing is ever sent in the clear.
     #[test]
-    fn plaintext_is_refused_for_remote_peers_without_a_pin() {
+    fn remote_peers_without_a_pin_never_probe_plaintext() {
         let c = FedHttpClient::new("198.51.100.7:8443", None).unwrap();
-        let err = c.require_transport_ok().unwrap_err();
-        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
-
-        // A configured pin is always allowed.
+        assert!(!c.cleartext_probe_allowed());
+        // A pin is irrelevant to the cleartext decision: pinned peers use TLS.
         let pinned = FedHttpClient::new("198.51.100.7:8443", Some("sha256:aa".into())).unwrap();
-        assert!(pinned.require_transport_ok().is_ok());
+        assert!(!pinned.cleartext_probe_allowed());
     }
 
     #[test]
@@ -461,7 +461,7 @@ mod tests {
         for host in ["127.0.0.1:8443", "localhost:8443", "[::1]:8443"] {
             let c = FedHttpClient::new(host, None).unwrap();
             assert!(
-                c.require_transport_ok().is_ok(),
+                c.cleartext_probe_allowed(),
                 "loopback {host} should be allowed"
             );
         }
