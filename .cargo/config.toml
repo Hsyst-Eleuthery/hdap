@@ -1,0 +1,6 @@
+# Cross-compilation is handled by cargo-zigbuild (single ~/.local/zig install,
+# no root/system toolchains):  cargo zigbuild --release --target <triple> --
+#
+# Supported targets:
+#   x86_64-unknown-linux-musl   static Linux binary
+#   x86_64-pc-windows-gnu       Windows console/GUI binaries (.exe)

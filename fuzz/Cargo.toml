@@ -1,0 +1,47 @@
+# Standalone fuzz workspace. Not a workspace member: cargo-fuzz needs its own
+# `cargo-fuzz` config and a nightly toolchain, and it must never be built by a
+# normal `cargo build --workspace`.
+#
+#   cargo +nightly install cargo-fuzz
+#   cargo +nightly fuzz run parse_hdap_doc
+#
+# The properties these targets assert are also covered by ordinary tests that
+# run in CI on stable (see `parse_never_panics_and_anything_accepted_roundtrips`
+# in hdap-core and the AME-39 tests in hdap-server), so the absence of nightly
+# does not leave these invariants unchecked.
+[package]
+name = "hdap-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+base64 = "0.22"
+hex = "0.4"
+
+[dependencies.hdap-core]
+path = "../crates/hdap-core"
+
+[dependencies.hdap-server]
+path = "../crates/hdap-server"
+
+[[bin]]
+name = "parse_hdap_doc"
+path = "fuzz_targets/parse_hdap_doc.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_http_request"
+path = "fuzz_targets/parse_http_request.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

@@ -1,0 +1,36 @@
+[package]
+name = "hdap-server"
+description = "HDAP network node: storage + REST API + federation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hdap-core = { path = "../hdap-core" }
+hdap-tls = { path = "../hdap-tls" }
+serde_json.workspace = true
+serde.workspace = true
+# Embedded database. `bundled` compiles SQLite from source so the node has
+# no system-library dependency — the archive must survive a bare `apt`-less
+# host, and the whole point of the DB is surviving.
+rusqlite = { version = "0.40", features = ["bundled"] }
+base64.workspace = true
+hex.workspace = true
+rand_core.workspace = true
+ed25519-dalek.workspace = true
+x25519-dalek.workspace = true
+rustls.workspace = true
+
+[dev-dependencies]
+rand.workspace = true
+
+[lib]
+name = "hdap_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hdap-server"
+path = "src/main.rs"
+required-features = []

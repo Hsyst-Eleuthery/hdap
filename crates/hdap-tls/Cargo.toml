@@ -1,0 +1,18 @@
+[package]
+name = "hdap-tls"
+description = "HDAP transport security: rustls server acceptor + client with self-signed cert pinning (AMI-09)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rustls.workspace = true
+rcgen.workspace = true
+sha2.workspace = true
+hex.workspace = true
+
+[lib]
+name = "hdap_tls"
+path = "src/lib.rs"

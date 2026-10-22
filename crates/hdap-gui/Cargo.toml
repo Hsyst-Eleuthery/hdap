@@ -1,0 +1,34 @@
+[package]
+name = "hdap-gui"
+description = "HDAP desktop client (egui) over the hdap-cli thin-client core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hdap-cli = { path = "../hdap-cli" }
+hdap-core = { path = "../hdap-core" }
+hdap-tls = { path = "../hdap-tls" }
+egui = "0.36"
+eframe = "0.36"
+rfd = "0.15"
+serde_json.workspace = true
+hex.workspace = true
+sha2.workspace = true
+image = "0.25"
+
+[dev-dependencies]
+hdap-server = { path = "../hdap-server" }
+base64.workspace = true
+ed25519-dalek.workspace = true
+x25519-dalek.workspace = true
+
+[lib]
+name = "hdap_gui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hdap-gui"
+path = "src/main.rs"

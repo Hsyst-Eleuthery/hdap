@@ -1,0 +1,17 @@
+/target
+/fuzz/target
+/fuzz/corpus
+/fuzz/artifacts
+/fuzz/coverage
+
+# Runtime state. Deliberately NOT ignoring `*.hdap` / `*.pow` globally: `.hdap`
+# is the wire/document format, so a blanket rule would silently swallow the next
+# test-vector fixture someone adds. Runtime documents live under these roots.
+/.hdap-dev
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Reference checkout and offline bundle. Neither belongs in the released repo.
+/hps
+/hdap.zip

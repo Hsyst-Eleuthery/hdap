@@ -1,0 +1,31 @@
+[package]
+name = "hdap-cli"
+description = "HDAP command line interface (thin client over hdap-core + HTTP/1.1)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hdap-core = { path = "../hdap-core" }
+hdap-tls = { path = "../hdap-tls" }
+serde_json.workspace = true
+base64.workspace = true
+hex.workspace = true
+rand_core.workspace = true
+ed25519-dalek.workspace = true
+x25519-dalek.workspace = true
+rustls.workspace = true
+
+[dev-dependencies]
+hdap-server = { path = "../hdap-server" }
+
+[lib]
+name = "hdap_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hdap-cli"
+path = "src/main.rs"
+required-features = []

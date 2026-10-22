@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    name: Check + Test (stable)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Lint
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Build
+        run: cargo build --workspace --all-targets
+      - name: Test
+        run: cargo test --workspace
+
+  fuzz:
+    name: Fuzzing (nightly)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'fuzz')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            fuzz
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+      # Build first, outside any shell timeout: compiling the instrumented
+      # targets on a cold cache takes minutes, and a `timeout` around the run
+      # would kill the build instead of the fuzzing loop.
+      - name: Build fuzz targets
+        working-directory: ./fuzz
+        run: cargo +nightly fuzz build
+      - name: Fuzz parse_hdap_doc
+        working-directory: ./fuzz
+        run: timeout 300 cargo +nightly fuzz run parse_hdap_doc -- -runs=10000 -max_total_time=120
+      - name: Fuzz parse_http_request
+        working-directory: ./fuzz
+        run: timeout 300 cargo +nightly fuzz run parse_http_request -- -runs=10000 -max_total_time=120
+
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+      - name: Audit dependencies
+        run: cargo audit
+
+  msrv:
+    name: MSRV Check (1.95)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Build with MSRV
+        run: cargo build --workspace --all-targets
