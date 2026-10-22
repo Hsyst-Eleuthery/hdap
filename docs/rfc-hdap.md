@@ -296,7 +296,7 @@ smuggling aqui é um bug de parser. Regras estritas:
 - `serve_tls` do daemon carrega a identidade do bundle `<data>/tls.identity` (fallback para o par legado `tls.crt`/`tls.key`, com migração automática); o pin é estável entre reinícios. Com `--ephemeral` a cert volta a ser gerada em memória (pin muda por boot), útil só em testes.
 - Rotação de `omphalos`: `POST /omphalos` (sessão do dono) com `SEED_ITER` monotônico; piso de replay zerado.
 - Sync de `pheme` com peers offline: fila `pendings` + retry com backoff ao reestabelecer; declara-se a janela de replay OTP = latência de sync (irredutível sem consenso global — §17.2).
-- Vetores de canonicalização: implementados como testes de roundtrip (parse/render) em `hdap-core`; suíte atual: **225 testes passando e 1 ignorado** (61 core, 68 server + 2 bin, 68 GUI, 19 CLI + 2 bin, 5 tls).
+- Vetores de canonicalização: implementados como testes de roundtrip (parse/render) em `hdap-core`; suíte atual: **227 testes passando e 1 ignorado** (61 core, 68 server + 4 bin, 68 GUI, 19 CLI + 2 bin, 5 tls).
 - Replicação para peer remoto usa **TLS com pin obrigatório** (`tls_pin` no `PeerRecord`); plaintext só é aceito em loopback (AME-37). Resposta de peer é lida com teto de tamanho, e o corpo para no `Content-Length` declarado em vez de esperar o peer fechar.
 - Parser HTTP: cabeçalho tem teto próprio (`MAX_HEAD_BYTES`, independente do `max_body`) e toda conexão aceita recebe deadline de leitura/escrita, para que um peer silencioso não segure uma thread (slowloris).
 

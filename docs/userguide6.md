@@ -81,6 +81,8 @@ O segundo é que o pin do certificado é parte da identidade do serviço. Se o c
 
 O terceiro é que o log é parte do contrato. Um operador precisa saber o que aconteceu, quando e por quê. O pyle registra as operações com identificadores, e o guia de execução mostra como correlacionar um erro do cliente com uma linha do log do servidor.
 
+Se você só quer alcançar a rede, sem operar um nó, os pyles oficiais mantidos pelo projeto são `pyle1.hdap.hsyst.org:8443`, `pyle2.hdap.hsyst.org:8444`, `pyle3.hdap.hsyst.org:8445` e `pyle.thais.fyi:8443`. Ao subir um nó com bind curinga, passe `--advertise` com o endereço público: é ele que define o id padrão do pyle e o endereço que os pares vão usar. Sem isso, o id sai do bind e fica inalcançável.
+
 ---
 
 ## Atualizações e compatibilidade

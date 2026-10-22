@@ -40,10 +40,10 @@ fn print_usage() {
          OPTIONS:\n  \
            --data DIR           where the archive lives (default ./hdap-node-data)\n  \
             --listen ADDR:PORT   bind address (default 127.0.0.1:8443)\n  \
-            --id SERVER_ID       node identifier (default: pyle-<base64(host:port)>)\n  \
-            --no-tls             plaintext HTTP (loopback/dev only)\n  \
-            --open-federation    accept handshakes from unknown nodes (TOFU; dev only)\n  \
-           --advertise ADDR:PORT  address peers should dial for this node\n  \
+            --id SERVER_ID       node identifier (default: pyle-<base64(advertise or listen)>)\n  \
+             --no-tls             plaintext HTTP (loopback/dev only)\n  \
+             --open-federation    accept handshakes from unknown nodes (TOFU; dev only)\n  \
+            --advertise ADDR:PORT  public address peers dial; also defines the default id\n  \
            --ephemeral          keep state in RAM only (no database file)\n  \
            --choregia BYTES     band bytes per mochthos (default 4194304)\n  \
            --moira BYTES        per-user storage quota; 0 = unlimited (default 0)\n  \
@@ -155,12 +155,24 @@ fn is_loopback_bind(listen: &str) -> bool {
     }
 }
 
+/// The id a node gives itself when `--id` is absent. `--advertise` is the
+/// public address peers will actually dial, so it must win over `--listen`:
+/// binding `0.0.0.0:8443` would otherwise bake an unreachable wildcard into the
+/// id (and every `endpoint_from_id` consumer would dial `0.0.0.0:8443`).
+fn default_server_id(listen: &str, advertise: Option<&str>) -> String {
+    let endpoint = advertise
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+        .unwrap_or(listen);
+    hdap_server::pyle::id_from_endpoint(endpoint)
+}
+
 fn main() -> ExitCode {
     let mut args = parse_args();
     let server_id = args
         .server_id
         .clone()
-        .unwrap_or_else(|| hdap_server::pyle::id_from_endpoint(&args.listen));
+        .unwrap_or_else(|| default_server_id(&args.listen, args.advertise.as_deref()));
     args.cfg.server_id = server_id.clone();
 
     let listener = match TcpListener::bind(&args.listen) {
@@ -223,13 +235,19 @@ fn main() -> ExitCode {
     };
 
     let mut node = Node::new(args.cfg);
-    node.advertise_endpoint = args.advertise.clone().or_else(|| {
-        if args.listen.starts_with("0.0.0.0:") || args.listen.starts_with("[::]:") {
-            None
-        } else {
-            Some(args.listen.clone())
-        }
-    });
+    node.advertise_endpoint = args
+        .advertise
+        .as_deref()
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            if args.listen.starts_with("0.0.0.0:") || args.listen.starts_with("[::]:") {
+                None
+            } else {
+                Some(args.listen.clone())
+            }
+        });
     if let Some((pin, _)) = &tls_cfg {
         node.tls_pin = Some(pin.clone());
     }
@@ -311,7 +329,28 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::is_loopback_bind;
+    use super::{default_server_id, is_loopback_bind};
+
+    /// The public address must define the self-id; otherwise a wildcard bind
+    /// leaks `0.0.0.0` into every `endpoint_from_id` consumer.
+    #[test]
+    fn advertise_endpoint_defines_the_default_id() {
+        assert_eq!(
+            default_server_id("0.0.0.0:8443", Some("pyle1.hdap.hsyst.org:8443")),
+            hdap_server::pyle::id_from_endpoint("pyle1.hdap.hsyst.org:8443")
+        );
+        assert_eq!(
+            default_server_id("0.0.0.0:8443", Some("  pyle.thais.fyi:8443  ")),
+            hdap_server::pyle::id_from_endpoint("pyle.thais.fyi:8443")
+        );
+    }
+
+    #[test]
+    fn listen_is_the_fallback_when_advertise_is_absent_or_blank() {
+        let expected = hdap_server::pyle::id_from_endpoint("127.0.0.1:8443");
+        assert_eq!(default_server_id("127.0.0.1:8443", None), expected);
+        assert_eq!(default_server_id("127.0.0.1:8443", Some("   ")), expected);
+    }
 
     #[test]
     fn loopback_binds_are_recognised() {

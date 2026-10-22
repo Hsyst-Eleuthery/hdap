@@ -322,7 +322,7 @@ Um nó de produção precisa de:
 - **disco persistente** — `--data` não deve apontar para `/tmp`;
 - **backup** — banco + `tls.identity` + arquivos exportados;
 - **limites** — `--moira`, `--max-upload`, `--rate-limit`, `--band-per-hour`;
-- **endereço anunciado** — `--advertise` para que os pares saibam como chegar;
+- **endereço anunciado** — `--advertise` define o endereço público e o id padrão do nó; é obrigatório na prática quando o bind é `0.0.0.0`;
 - **federação fechada** — allowlist em vez de `--open-federation`;
 - **usuário dedicado** — o processo não precisa de root.
 
@@ -336,7 +336,7 @@ O servidor imprime o pin no stderr e o expõe em `/health`. Em produção, distr
 
 O projeto não pede confiança na maturidade. Ele mostra os testes:
 
-- **225 testes automatizados** (mais um teste manual de integração com nó real);
+- **227 testes automatizados** (mais um teste manual de integração com nó real);
 - testes de dois e três nós para federação, réplica, delete e sucessão;
 - testes de GUI que renderizam a interface em 960×640 e falham se um painel sair da tela;
 - testes de segurança para replay de OTP, pin incorreto, CR isolado, request smuggling e delete de peer não-originário;

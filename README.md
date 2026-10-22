@@ -183,15 +183,30 @@ Um nó de produção precisa de três coisas: TLS, persistência e uma política
   --rate-limit 60
 ```
 
-TLS é obrigatório fora de loopback: o nó se recusa a subir em claro em endereço não local. O diretório `--data` deve apontar para um disco persistente e com backup. A `--moira` limita o armazenamento por usuário, e `0` significa ilimitado. O `--max-upload` limita o tamanho de cada arquivo, e o `--rate-limit` reduz abuso de conexões. O `--advertise` informa aos pares qual endereço usar para chegar até você. A federação fechada é o modo recomendado: nós conhecidos entram por allowlist, não por TOFU.
+TLS é obrigatório fora de loopback: o nó se recusa a subir em claro em endereço não local. O diretório `--data` deve apontar para um disco persistente e com backup. A `--moira` limita o armazenamento por usuário, e `0` significa ilimitado. O `--max-upload` limita o tamanho de cada arquivo, e o `--rate-limit` reduz abuso de conexões. O `--advertise` é o endereço público que os pares usam para chegar até você e também define o id padrão do nó (`pyle-<base64(advertise)>`); sem ele, um bind em `0.0.0.0` geraria um id inalcançável. Um `--id` explícito vence o `--advertise`. A federação fechada é o modo recomendado: nós conhecidos entram por allowlist, não por TOFU.
 
 O processo não precisa de root. Rode com um usuário dedicado, mantenha o diretório de dados fora de `/tmp` e faça backup de `tls.identity` junto com o banco, porque sem ele o pin do nó muda. Detalhes de operação, systemd, firewall e recuperação estão no **[Guia do Usuário](docs/userguide6.md)** e no **[Manual Técnico](docs/tecnico.md)**.
 
 ---
 
+## Pyles oficiais
+
+Estes são os nós públicos operados pelo projeto. Use-os para publicar, replicar ou simplesmente para alcançar a rede:
+
+| Endereço | Id do pyle |
+| --- | --- |
+| `pyle1.hdap.hsyst.org:8443` | `pyle-cHlsZTEuaGRhcC5oc3lzdC5vcmc6ODQ0Mw` |
+| `pyle2.hdap.hsyst.org:8444` | `pyle-cHlsZTIuaGRhcC5oc3lzdC5vcmc6ODQ0NA` |
+| `pyle3.hdap.hsyst.org:8445` | `pyle-cHlsZTMuaGRhcC5oc3lzdC5vcmc6ODQ0NQ` |
+| `pyle.thais.fyi:8443` | `pyle-cHlsZS50aGFpcy5meWk6ODQ0Mw` |
+
+Um nó que se anuncia nesses endereços deve subir com `--listen 0.0.0.0:<porta> --advertise <endereço>`, para que o id derivado seja o endereço público, e não o bind curinga. A confiança continua vindo da assinatura de conteúdo, do hash e da allowlist — conhecer o endereço de um pyle não prova quem responde ali.
+
+---
+
 ## Qualidade e verificação
 
-O HDAP é construído com testes antes de promessas. A suíte tem **225 testes automatizados** cobrindo núcleo, servidor, CLI, TLS e GUI, além de um teste manual de integração com nó real. Há **testes adversariais** para replay, OTP, pin errado, CR isolado, request smuggling, permissão negada, réplica divergente e delete não autorizado. Há **fuzzing** dos parsers de documento e de requisição HTTP. O **modelo de ameaça** tem 41 entradas `AME-*`, cada uma ligada a uma mitigação e, quando aplicável, a um teste. E o CI exige formatação e lint (`cargo fmt --check`, `cargo clippy -D warnings`) antes de qualquer merge.
+O HDAP é construído com testes antes de promessas. A suíte tem **227 testes automatizados** cobrindo núcleo, servidor, CLI, TLS e GUI, além de um teste manual de integração com nó real. Há **testes adversariais** para replay, OTP, pin errado, CR isolado, request smuggling, permissão negada, réplica divergente e delete não autorizado. Há **fuzzing** dos parsers de documento e de requisição HTTP. O **modelo de ameaça** tem 41 entradas `AME-*`, cada uma ligada a uma mitigação e, quando aplicável, a um teste. E o CI exige formatação e lint (`cargo fmt --check`, `cargo clippy -D warnings`) antes de qualquer merge.
 
 O objetivo não é dizer que o sistema é invulnerável — isso seria mentira. É garantir que cada garantia declarada tenha um mecanismo correspondente e um teste que tente quebrá-la.
 

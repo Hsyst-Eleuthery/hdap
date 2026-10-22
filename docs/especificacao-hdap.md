@@ -399,7 +399,7 @@ Um pyle novo só é aceito depois de um **handshake de callback** ao endpoint an
 - health check de um par a cada 5 min e verificação completa apenas de candidatos novos;
 - fila e lista limitadas (`MAX_JOBS`/`MAX_KNOWN_PEERS`), TTL de dedup de 10 min.
 
-A descoberta automática só roda com `--open-federation`; com allowlist estrita um peer confiável não pode admitir um desconhecido no seu lugar. Nós convergem para a mesma lista de pyles **dialáveis** (endpoint não vazio); falhas viram `PeerHealth` local, não removem o registro histórico. `--advertise ADDR:PORT` informa o endereço público quando o `server_id` não é derivado de `--listen`.
+A descoberta automática só roda com `--open-federation`; com allowlist estrita um peer confiável não pode admitir um desconhecido no seu lugar. Nós convergem para a mesma lista de pyles **dialáveis** (endpoint não vazio); falhas viram `PeerHealth` local, não removem o registro histórico. `--advertise ADDR:PORT` define o endereço público e o id padrão do nó (`pyle-<base64(advertise)>`); sem ele, o id vem de `--listen`, e um bind curinga produziria um id inalcançável.
 
 **Replicação automática (§10.3):** ao receber `/homospondoi/sync` com `content_hash` que o nó ainda não possui, o nó dispara `GET /homospondoi/fetch_blob?hash=...` no peer remetente, verifica o hash, cifra com sua `master_key` local e registra no `prytaneion` como réplica. A replicação usa a chave de assinatura do nó (`node_sign_seed`) para autenticar a requisição de saída.
 

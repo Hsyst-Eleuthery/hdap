@@ -24,6 +24,8 @@ Primeira release de produção do HDAP. Codinome de protocolo: **Themelio**. Cod
 - Replicação verificada, notificação de deleção e proteção contra delete de peer não-originário.
 - Limites de parser, rate limit, quota por usuário e teto de upload.
 - Recusa de TLS desligado fora de loopback.
+- `--advertise` agora define o id padrão do nó: um bind em `0.0.0.0` deixa de gravar o wildcard no `pyle-<base64>` e passa a usar o endereço público.
+- Lista dos pyles oficiais em `pyle1.hdap.hsyst.org:8443`, `pyle2.hdap.hsyst.org:8444`, `pyle3.hdap.hsyst.org:8445` e `pyle.thais.fyi:8443` documentada no README e no guia.
 
 ### GUI
 
@@ -48,7 +50,7 @@ Primeira release de produção do HDAP. Codinome de protocolo: **Themelio**. Cod
 
 ### Qualidade
 
-- 225 testes automatizados + 1 teste manual de integração.
+- 227 testes automatizados + 1 teste manual de integração.
 - Modelo de ameaça com 41 entradas `AME-*`.
 - Fuzzing dos parsers de documento e HTTP.
 - CI com formatação, lint, build, testes e auditoria de dependências.
