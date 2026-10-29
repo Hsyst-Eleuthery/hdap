@@ -1,6 +1,6 @@
 # Segurança do HDAP
 
-**HDAP v1.0 — Themelio · Veritas Aeterna** · Revisão de 2026-10-22.
+**HDAP v1.001 — Themelio · Epoptia** · Revisão de 2026-10-29.
 
 ## Como reportar
 

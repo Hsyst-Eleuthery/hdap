@@ -1,6 +1,6 @@
 # Guia do Usuário — HDAP
 
-**HDAP v1.0 — codinome de protocolo: Themelio (Marco Zero) · codinome de lançamento: Veritas Aeterna**
+**HDAP v1.001 — codinome de protocolo: Themelio (Marco Zero, matriz v1) · codinome de lançamento: Epoptia**
 
 **Escrito por Thaís (op3n/op3ny)**
 
@@ -78,7 +78,7 @@ O aplicativo `hdap-gui` foi feito justamente para esconder o resto. Você navega
 
 Todo lançamento do HDAP carrega **dois codinomes**. O **codinome de protocolo** dá nome a uma geração da linguagem do protocolo: é ele que muda quando a forma como os nós conversam ou como os documentos são interpretados muda. O **codinome de lançamento** dá nome ao pacote como um todo: é ele que muda em qualquer release, inclusive nas correções que não tocam o protocolo.
 
-O marco inicial é o **HDAP v1.0**. O codinome de protocolo é **Themelio**, que significa "Marco Zero" em grego, e o codinome de lançamento é **Veritas Aeterna**, "verdade eterna". A escolha dos nomes não é acidental: o protocolo começa no marco zero e tem como ambição uma verdade que não dependa de quem a conta.
+O marco inicial é o **HDAP v1.0**. O codinome de protocolo é **Themelio**, que significa "Marco Zero" em grego, e o codinome de lançamento é **Veritas Aeterna**, "verdade eterna". A escolha dos nomes não é acidental: o protocolo começa no marco zero e tem como ambição uma verdade que não dependa de quem a conta. A release **v1.001** mantém o protocolo **Themelio** (matriz v1) e recebe o codinome de lançamento **Epoptia**; ela corrige a edição e a avaliação das permissões na interface.
 
 As regras de versionamento são simples e valem para sempre. Atualizações que **não** mudam o protocolo — melhorias de interface, correções de bug, correções de segurança, mudanças de documentação ou de empacotamento — saem como `v1.001`, `v1.002`, `v1.003`, e assim por diante. Nesses lançamentos, **apenas o codinome de lançamento muda**; o codinome de protocolo continua o mesmo, porque a linguagem não mudou. Já as atualizações que **mudam o protocolo** — o funcionamento ou a comunicação entre nós, os formatos de documento, as rotas, as provas — abrem uma versão nova, como `v2.0`. Nesse caso, **os dois codinomes mudam**, porque uma nova geração de protocolo merece um novo nome.
 

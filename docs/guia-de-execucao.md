@@ -1,6 +1,6 @@
 # Guia de Execução — Compilar, Testar e Empacotar o HDAP
 
-**HDAP v1.0 — Themelio · Veritas Aeterna**
+**HDAP v1.001 — Themelio · Epoptia**
 
 **Escrito por Thaís (op3n/op3ny)**
 
@@ -192,7 +192,7 @@ O alvo `x86_64-unknown-linux-gnu` usa o compilador nativo; os demais usam Zig. A
 
 ```bash
 cd target/release-assets
-sha256sum -c hdap-1.0.0-x86_64-unknown-linux-musl.tar.gz.sha256
+sha256sum -c hdap-1.0.1-x86_64-unknown-linux-musl.tar.gz.sha256
 ```
 
 ---

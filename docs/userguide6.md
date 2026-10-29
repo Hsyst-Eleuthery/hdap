@@ -1,6 +1,6 @@
 # Aplicativos e Operação
 
-**HDAP v1.0 — Themelio · Veritas Aeterna**
+**HDAP v1.001 — Themelio · Epoptia**
 
 **Escrito por Thaís (op3n/op3ny)**
 
@@ -45,7 +45,7 @@ Um detalhe que confunde no começo: o pyle é o servidor; a casa é o espaço. `
 
 A GUI é construída em torno de um explorador de arquivos. A área central mostra a casa, permite navegar, enviar, baixar, renomear, apagar e criar pastas. A barra superior carrega a URI lógica e resolve aliases; a barra lateral reúne os lugares, as pessoas e os atalhos de painel. A ideia é que você reconheça o lugar em que está antes de agir, porque quase toda ação depende do caminho e do dono.
 
-Os painéis laterais abrem as tarefas que não cabem na grade. O painel **Documentos** lista os `.hdap` da casa e abre cada um no editor canônico, com validação antes de salvar. O painel **Permissões** edita a `adeia` em formato tabular e em texto, com pré-visualização do que será assinado. O painel **Configuração** reúne os seis documentos da casa, incluindo o `diadosi` e o `kerux`.
+Os painéis laterais abrem as tarefas que não cabem na grade. O painel **Documentos** lista os `.hdap` da casa e abre cada um no editor canônico, com validação antes de salvar. O painel **Permissões** edita a `adeia` como uma lista de regras legíveis: cada regra é uma linha com **Quem** (Todos ou um Usuário pelo ID global), **Onde** (`/` para a casa inteira, uma pasta como `docs/` ou um arquivo como `docs/segredo.txt`) e **Pode** (Negar, Ler, Escrever ou Dono). O texto canônico aparece ao lado e é reescrito à medida que você ajusta a regra, com pré-visualização do que será assinado. A ordem das regras no arquivo não importa: a avaliação sempre dá prioridade ao caminho mais específico, ao usuário sobre Todos e à negação sobre a liberação. O painel **Configuração** reúne os seis documentos da casa, incluindo o `diadosi` e o `kerux`.
 
 O painel **Banda** mostra o saldo, o consumo, a `moira` e a tabela do `timi`, com o custo estimado antes de cada operação. O painel **Preços** consulta o `timi` do pyle, e o painel **Aliases** publica e resolve nomes no DDNS. O painel de **Rede** mostra a bolha, os pares conectados e a saúde do nó. Juntos, eles cobrem o ciclo de uso sem exigir que você decore comandos.
 
@@ -87,7 +87,7 @@ Se você só quer alcançar a rede, sem operar um nó, os pyles oficiais mantido
 
 ## Atualizações e compatibilidade
 
-O HDAP segue uma política de versionamento explícita. A versão `1.0` é o marco zero do protocolo, com o codinome **Themelio**, e o lançamento correspondente tem o codinome **Veritas Aeterna**. Correções, melhorias de interface, correções de bugs, vulnerabilidades, documentação e empacotamento geram versões `1.001`, `1.002` e assim por diante, e apenas o codinome do lançamento muda. Mudanças no protocolo geram uma nova versão maior, como `2.0`, e nesse caso os dois codinomes mudam.
+O HDAP segue uma política de versionamento explícita. A versão `1.0` é o marco zero do protocolo, com o codinome **Themelio**, e o lançamento correspondente tem o codinome **Veritas Aeterna**. A versão **v1.001** mantém o protocolo **Themelio** (matriz v1) e recebe o codinome de lançamento **Epoptia**; ela corrige a edição e a avaliação das permissões na GUI. Correções, melhorias de interface, correções de bugs, vulnerabilidades, documentação e empacotamento geram versões `1.001`, `1.002` e assim por diante, e apenas o codinome do lançamento muda. Mudanças no protocolo geram uma nova versão maior, como `2.0`, e nesse caso os dois codinomes mudam.
 
 Essa política existe para que você saiba o que esperar. Uma versão `1.0xx` não quebra a compatibilidade do protocolo; ela corrige e melhora. Uma versão `2.0` pode introduzir mudanças incompatíveis, e o guia de migração acompanha o lançamento. Toda release atualiza a documentação e declara os dois codinomes na primeira página.
 

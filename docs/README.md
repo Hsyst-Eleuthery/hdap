@@ -1,6 +1,6 @@
 # Documentação do HDAP
 
-Este diretório reúne a documentação pública do **Hsyst Descentralized Archive Protocol**, na versão 1.0, com codinome de protocolo **Themelio** e codinome de lançamento **Veritas Aeterna**. A documentação foi escrita para ser lida em texto corrido, com links entre os capítulos, e para servir tanto a quem quer usar o sistema quanto a quem quer operá-lo, implementá-lo ou auditá-lo.
+Este diretório reúne a documentação pública do **Hsyst Descentralized Archive Protocol**, na versão **v1.001**, com codinome de protocolo **Themelio** (matriz v1) e codinome de lançamento **Epoptia**. A documentação foi escrita para ser lida em texto corrido, com links entre os capítulos, e para servir tanto a quem quer usar o sistema quanto a quem quer operá-lo, implementá-lo ou auditá-lo.
 
 ## Por onde começar
 
@@ -20,7 +20,7 @@ A documentação usa a transliteração grega em minúsculas para os nomes de pr
 
 ## Versionamento da documentação
 
-Toda release do HDAP atualiza a documentação. A versão 1.0 é o marco zero, com os codinomes Themelio e Veritas Aeterna. Correções que não mudam o protocolo geram versões `1.001`, `1.002` e assim por diante, e apenas o codinome de lançamento muda. Mudanças de protocolo geram uma nova versão maior, como `2.0`, e os dois codinomes mudam. O histórico completo fica no [CHANGELOG](../CHANGELOG.md).
+Toda release do HDAP atualiza a documentação. A versão 1.0 é o marco zero, com os codinomes Themelio e Veritas Aeterna; a versão **v1.001** mantém o protocolo Themelio (matriz v1) e usa o codinome de lançamento **Epoptia**. Correções que não mudam o protocolo geram versões `1.001`, `1.002` e assim por diante, e apenas o codinome de lançamento muda. Mudanças de protocolo geram uma nova versão maior, como `2.0`, e os dois codinomes mudam. O histórico completo fica no [CHANGELOG](../CHANGELOG.md).
 
 ## Documentos
 

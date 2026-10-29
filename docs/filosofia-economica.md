@@ -1,8 +1,8 @@
 # HDAP — Καταλλαξία (Filosofia Econômica Austríaca)
 
-**HDAP v1.0 — Themelio · Veritas Aeterna**
+**HDAP v1.001 — Themelio · Epoptia**
 
-> Revisão de 2026-10-22 · Protocolo: **1.0**. Este é o documento de design econômico do HDAP. Ele explica por que guardar e servir conteúdo custa um recurso escasso, como esse recurso é gerado e precificado e o que muda quando o objetivo é uma **rede pública global**. A inspiração declarada é a **escola austríaca** (Mises, Hayek, Böhm-Bawerk, Kirzner). Não é um plano de "economia de token"; é a camada de **incentivos como ordem espontânea**, opcional por módulo (`katallaxia`).
+> Revisão de 2026-10-29 · Protocolo: **1.0** (matriz v1). Este é o documento de design econômico do HDAP. Ele explica por que guardar e servir conteúdo custa um recurso escasso, como esse recurso é gerado e precificado e o que muda quando o objetivo é uma **rede pública global**. A inspiração declarada é a **escola austríaca** (Mises, Hayek, Böhm-Bawerk, Kirzner). Não é um plano de "economia de token"; é a camada de **incentivos como ordem espontânea**, opcional por módulo (`katallaxia`).
 
 ---
 

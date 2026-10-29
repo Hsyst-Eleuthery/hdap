@@ -4016,8 +4016,9 @@ mod tests {
         // Tick a permission: the document must be rewritten, not rejected.
         if let Some(mut st) = app.editor.take() {
             st.form = Form::Perms(vec![crate::editor::PermRow {
-                scope: "all".into(),
+                path: "/".into(),
                 right: "read".into(),
+                ..crate::editor::PermRow::default()
             }]);
             editor::apply_form(&app, &mut st);
             app.editor = Some(st);
@@ -4050,8 +4051,9 @@ mod tests {
 
         if let Some(mut st) = app.editor.take() {
             st.form = Form::Perms(vec![crate::editor::PermRow {
-                scope: "all".into(),
+                path: "/".into(),
                 right: "read".into(),
+                ..crate::editor::PermRow::default()
             }]);
             editor::apply_form(&app, &mut st);
             app.editor = Some(st);
@@ -4171,8 +4173,9 @@ mod tests {
         // Tick a permission in the form.
         if let Some(mut st) = app.editor.take() {
             st.form = crate::editor::Form::Perms(vec![PermRow {
-                scope: "all".into(),
+                path: "/".into(),
                 right: "read".into(),
+                ..PermRow::default()
             }]);
             editor::apply_form(&app, &mut st);
             app.editor = Some(st);

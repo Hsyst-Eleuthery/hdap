@@ -45,7 +45,7 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use hdap_core::doc::parse as parse_doc;
-use hdap_core::protocol::{parse_perm_line, Scope};
+use hdap_core::protocol::{normalize_acl_path, parse_perm_line, Right, Scope};
 
 /// Effective access level derived from `adeia.hdap` lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,15 +53,6 @@ pub enum Access {
     Read,
     Write,
     Own,
-}
-
-fn right_to_access(r: hdap_core::protocol::Right) -> Option<Access> {
-    match r {
-        hdap_core::protocol::Right::Deny => None,
-        hdap_core::protocol::Right::Read => Some(Access::Read),
-        hdap_core::protocol::Right::Write => Some(Access::Write),
-        hdap_core::protocol::Right::Own => Some(Access::Own),
-    }
 }
 
 fn json_err(msg: &str) -> String {
@@ -458,11 +449,26 @@ fn diadosi_allows(acl: &str, pyle: &str) -> bool {
 }
 
 /// Evaluate an `adeia` document against one `(owner, path, need)` request.
+///
+/// Precedence follows the user guide (§ "Permissões: a adeia"):
+///
+/// 1. The most specific path wins. A rule on `docs/secret.txt` beats a rule on
+///    `docs/`, which beats a whole-house rule.
+/// 2. At the same path, a `user:<id>` rule beats an `all` rule.
+/// 3. At the same specificity, `deny` beats any positive right.
+/// 4. Default is deny.
+///
+/// `deny` used to be parsed but ignored, so "everyone may read except Maria
+/// on this file" silently granted Maria the file. This is the fix.
 fn acl_grants(acl: &str, owner: &str, requester: &str, path: &str, need: Access) -> bool {
     let Ok(doc) = parse_doc(acl) else {
         return false;
     };
-    let mut granted = false;
+    let requested = normalize_acl_path(path);
+    let mut best: Option<(usize, bool)> = None;
+    let mut denied = false;
+    let mut allowed = false;
+
     for line in doc.body.values() {
         let Some((line_owner, scope, right)) = parse_perm_line(line) else {
             continue;
@@ -470,26 +476,74 @@ fn acl_grants(acl: &str, owner: &str, requester: &str, path: &str, need: Access)
         if line_owner != owner {
             continue;
         }
-        let matched = match scope {
-            Ok(Scope::All) => true,
-            Ok(Scope::User(u)) => u == requester,
-            Ok(Scope::Path(p)) => path.starts_with(p.trim_end_matches('/')),
-            Err(_) => false,
+        let Ok(scope) = scope else {
+            continue;
         };
-        if matched {
-            let Some(access) = right_to_access(right) else {
-                continue;
-            };
-            let meets = match need {
-                Access::Read => matches!(access, Access::Read | Access::Write | Access::Own),
-                Access::Write | Access::Own => matches!(access, Access::Write | Access::Own),
-            };
-            if meets {
-                granted = true;
+        let (subject, rule_path) = split_scope(&scope);
+        if subject.is_some_and(|user| user != requester) {
+            continue;
+        }
+        if !acl_path_matches(&requested, &rule_path) {
+            continue;
+        }
+        let specificity = (acl_path_depth(&rule_path), subject.is_some());
+        match best {
+            None => {
+                best = Some(specificity);
+                denied = false;
+                allowed = false;
+            }
+            Some(current) if specificity > current => {
+                best = Some(specificity);
+                denied = false;
+                allowed = false;
+            }
+            Some(current) if specificity < current => continue,
+            Some(_) => {}
+        }
+        match right {
+            Right::Deny => denied = true,
+            Right::Read | Right::Write | Right::Own => {
+                if right_meets(right, need) {
+                    allowed = true;
+                }
             }
         }
     }
-    granted
+    !denied && allowed
+}
+
+/// Split a parsed scope into its two coordinates: subject (if any) and path.
+fn split_scope(scope: &Scope) -> (Option<&str>, String) {
+    match scope {
+        Scope::All => (None, String::new()),
+        Scope::User(user) => (Some(user.as_str()), String::new()),
+        Scope::Path(path) => (None, normalize_acl_path(path)),
+        Scope::UserPath(user, path) => (Some(user.as_str()), normalize_acl_path(path)),
+    }
+}
+
+/// Does a rule path cover the requested path? A rule covers itself and
+/// everything below it, but `docs` must not match `docs2/file`.
+fn acl_path_matches(requested: &str, rule: &str) -> bool {
+    rule.is_empty() || requested == rule || requested.starts_with(&format!("{rule}/"))
+}
+
+fn acl_path_depth(path: &str) -> usize {
+    path.split('/')
+        .filter(|segment| !segment.is_empty())
+        .count()
+}
+
+/// Whether a positive right satisfies the requested access. `write` keeps
+/// implying `read` for compatibility with v1.0 documents and with the GUI's
+/// upload-then-preview flow; `own` covers everything.
+fn right_meets(granted: Right, need: Access) -> bool {
+    match need {
+        Access::Read => matches!(granted, Right::Read | Right::Write | Right::Own),
+        Access::Write => matches!(granted, Right::Write | Right::Own),
+        Access::Own => matches!(granted, Right::Own),
+    }
 }
 
 fn path_in_scope(path: &str, scope: &str) -> bool {
@@ -663,6 +717,71 @@ mod tests {
         assert!(
             node.authorize_replica(reader, owner, path),
             "the old public snapshot must keep serving the already replicated post"
+        );
+    }
+
+    /// The permission bug this release fixes: `deny` was parsed but never
+    /// consulted, so a specific denial silently lost to a broad grant. The
+    /// matrix below is the contract the GUI now exposes: most specific path
+    /// wins, a named user beats `all` at the same path, and `deny` beats a
+    /// positive right at the same specificity.
+    #[test]
+    fn acl_deny_is_specific_and_beats_positive_grants() {
+        use hdap_core::protocol::{adeia_doc, Permission, Right, Scope};
+        let (node, _) = Node::with_clock_and_now(Config::default(), 1000);
+        let owner = "jose_0123456789abcdef";
+        let maria = "maria_0123456789abcdef";
+        let joao = "joao_0123456789abcdef";
+        let perms = [
+            // Everyone may read the whole house...
+            Permission {
+                scope: Scope::All,
+                right: Right::Read,
+            },
+            // ...except Maria may not read this one file.
+            Permission {
+                scope: Scope::UserPath(maria.into(), "docs/privado.txt".into()),
+                right: Right::Deny,
+            },
+            // Maria still gets an explicitly allowed file inside a denied folder.
+            Permission {
+                scope: Scope::Path("docs/rascunhos".into()),
+                right: Right::Deny,
+            },
+            Permission {
+                scope: Scope::UserPath(maria.into(), "docs/rascunhos/publico.txt".into()),
+                right: Right::Read,
+            },
+        ];
+        let acl = adeia_doc(owner, 1, None, 900, &perms, None).render();
+        {
+            let mut st = node.state.lock().unwrap();
+            st.permissions.insert(owner.into(), acl);
+        }
+
+        assert!(
+            node.authorize(maria, owner, "docs/publico.txt", Access::Read),
+            "a user denial on one file must not close the rest of the house"
+        );
+        assert!(
+            !node.authorize(maria, owner, "docs/privado.txt", Access::Read),
+            "the explicit file deny must win over `all read`"
+        );
+        assert!(
+            node.authorize(joao, owner, "docs/privado.txt", Access::Read),
+            "the deny is bound to Maria, not to the path globally"
+        );
+        assert!(
+            !node.authorize(maria, owner, "docs/rascunhos/a.txt", Access::Read),
+            "a folder deny still applies to its children"
+        );
+        assert!(
+            node.authorize(maria, owner, "docs/rascunhos/publico.txt", Access::Read),
+            "a more specific allow must beat the folder deny"
+        );
+        assert!(
+            !node.authorize(maria, owner, "docs", Access::Write),
+            "deny is not read-only and default remains deny for write"
         );
     }
 

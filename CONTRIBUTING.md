@@ -36,7 +36,7 @@ Testes de federação e GUI podem subir nós reais em processo; siga o padrão e
 
 ## Versionamento e releases
 
-O HDAP usa dois codinomes por lançamento. O **codinome de protocolo** nomeia a geração da linguagem e muda apenas quando a comunicação ou a interpretação dos documentos muda; o **codinome de lançamento** muda em qualquer release. A versão 1.0 é o marco zero, com o protocolo **Themelio** e o lançamento **Veritas Aeterna**.
+O HDAP usa dois codinomes por lançamento. O **codinome de protocolo** nomeia a geração da linguagem e muda apenas quando a comunicação ou a interpretação dos documentos muda; o **codinome de lançamento** muda em qualquer release. A versão 1.0 é o marco zero, com o protocolo **Themelio** e o lançamento **Veritas Aeterna**. A versão **v1.001** mantém o protocolo **Themelio** (matriz v1) e recebe o codinome de lançamento **Epoptia**.
 
 Uma mudança que não altera o protocolo — correção de bug, melhoria de interface, correção de segurança, documentação ou empacotamento — gera a próxima versão de patch, como `v1.001`, com um novo codinome de lançamento e o mesmo codinome de protocolo. Uma mudança de protocolo abre uma versão maior, como `v2.0`, e exige que os dois codinomes mudem. Toda release atualiza o [CHANGELOG](CHANGELOG.md), a documentação e as datas de revisão, e o procedimento completo está no [Guia de Execução](docs/guia-de-execucao.md). Mudanças de protocolo precisam de uma issue de semântica antes do código.
 

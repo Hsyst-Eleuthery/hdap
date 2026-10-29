@@ -1,6 +1,6 @@
 # Arquivos, Documentos e Permissões
 
-**HDAP v1.0 — Themelio · Veritas Aeterna**
+**HDAP v1.001 — Themelio · Epoptia**
 
 **Escrito por Thaís (op3n/op3ny)**
 
@@ -71,7 +71,7 @@ Um exemplo simplificado de uma permissão ajuda a fixar a forma:
 # CREATED_AT: 1737500000
 ### :END HEAD
 ### BODY:
-# PERM all / read
+# PERM0000: PERM thais_a3f9c2d1e0b7aa11 all / read
 ### :END BODY
 ### SIGS:
 # SIGNER: thais_a3f9c2d1e0b7aa11
@@ -111,16 +111,16 @@ Editar um documento é, portanto, publicar uma nova edição assinada. Não exis
 A `adeia.hdap` é a lista de permissões da sua casa. Ela é um documento público e assinado por você, e cada linha é uma regra. Um exemplo:
 
 ```
-PERM all / read
-PERM user:<id-da-maria> docs/ write
-PERM user:<id-do-joao> docs/segredo.txt deny
+PERM <seu-id> all / read
+PERM <seu-id> user:<id-da-maria> docs/ write
+PERM <seu-id> user:<id-do-joao> docs/segredo.txt deny
 ```
 
-A primeira linha concede leitura da raiz a qualquer pessoa autenticada. A segunda concede escrita na pasta `docs/` a uma identidade específica. A terceira nega explicitamente o arquivo `docs/segredo.txt` a outra identidade. O sujeito é sempre o ID global, com sufixo; o caminho pode ser a raiz `/`, uma pasta ou um arquivo; os direitos são `read`, `write` e `own`; e `deny` nega explicitamente.
+A primeira linha concede leitura da raiz a qualquer pessoa autenticada. A segunda concede escrita na pasta `docs/` a uma identidade específica. A terceira nega explicitamente o arquivo `docs/segredo.txt` a outra identidade. O campo seguinte a `PERM` é o dono da casa, que a interface preenche sozinha. O sujeito é `all` ou o ID global, com sufixo; o caminho pode ser a raiz `/`, uma pasta ou um arquivo; os direitos são `read`, `write` e `own`; e `deny` nega explicitamente. Na interface, a regra é lida como **Quem / Onde / Pode**: escolha se vale para todos ou para um usuário, escreva o caminho e escolha o direito.
 
 A busca é sempre do caminho mais específico para o mais geral. Por isso é possível liberar a pasta inteira e negar um único arquivo dentro dela. O sujeito `user:<id>` vence `all`, e `deny` vence os direitos positivos no mesmo nível de especificidade. Na ausência de qualquer regra que conceda o direito pedido, a resposta é negativa. Esse desenho é deliberadamente conservador: o padrão é negar, e cada exceção precisa ser escrita de forma explícita.
 
-Os três direitos têm significados precisos. `read` permite baixar, listar e resolver o conteúdo. `write` permite enviar, editar e apagar dentro do escopo. `own` permite transferir posse e conceder permissões. Um detalhe que costuma surpreender é que `write` não implica `read`. Isso é intencional: pode ser útil permitir que alguém grave em uma pasta sem expor o conteúdo dela, como um balcão de entregas em que a pessoa pode deixar um pacote mas não pode abrir os pacotes dos outros.
+Os três direitos têm significados precisos. `read` permite baixar, listar e resolver o conteúdo. `write` permite enviar, editar e apagar dentro do escopo. `own` permite transferir posse e conceder permissões. Na matriz v1, `write` também satisfaz `read`: quem pode gravar em uma pasta consegue reler o que gravou e conferir o resultado.
 
 ---
 
@@ -184,7 +184,7 @@ O caminho de leitura é o espelho disso. O cliente pede o arquivo, o pyle verifi
 
 **Posso apagar para valer?** Você pode apagar sua cópia e notificar as réplicas. Um nó que já copiou o conteúdo pode tentar retê-lo; o protocolo registra e permite penalizar reputacionalmente, mas não invade o disco de ninguém. Essa é uma limitação honesta da federação.
 
-**Qual a diferença entre `read`, `write` e `own`?** `read` permite ver e baixar; `write` permite alterar o conteúdo; `own` permite transferir a posse e conceder permissões. `write` não implica `read`, e `own` é o direito mais forte.
+**Qual a diferença entre `read`, `write` e `own`?** `read` permite ver e baixar; `write` permite alterar o conteúdo e, na matriz v1, também satisfaz `read`; `own` permite transferir a posse e conceder permissões e é o direito mais forte. `write` não amplia o escopo de uma delegação (`exousia`), que tem regras próprias.
 
 ---
 

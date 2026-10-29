@@ -64,22 +64,36 @@ impl Right {
 }
 
 /// Scope of an ACL grant.
+///
+/// A rule has two independent coordinates: **who** it applies to and **where**
+/// it applies. The variants keep the historical shapes so old `adeia`
+/// documents keep parsing, while [`Scope::UserPath`] adds the one combination
+/// the old model could not express: a named user restricted to (or denied on)
+/// a single path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Scope {
-    /// Applies to everyone.
+    /// Applies to everyone, on the whole house.
     All,
-    /// Applies to a single user (guest id).
+    /// Applies to a single user (guest id), on the whole house.
     User(String),
-    /// Applies to a top-level path (relative to the owner's doc space).
+    /// Applies to everyone, under one path (relative to the owner's space).
     Path(String),
+    /// Applies to a single user, under one path.
+    UserPath(String, String),
 }
 
-/// A fully-qualified permission line, e.g.
-/// `PERM user:<guest> <path> read` or `ALLOW <user> <path> <right>`.
+/// A fully-qualified permission line.
 ///
-/// Canonical serialization:
-/// `PERM <scope> <path> <right>`
-/// where scope is `all`, `user:<id>`, or `path:<path>`.
+/// Canonical serialization (v1.001, backward compatible):
+///
+/// ```text
+/// PERM <owner> <sujeito> <caminho> <direito>
+/// ```
+///
+/// where `sujeito` is `all` or `user:<id>`, and `caminho` is `/`, a folder, or
+/// a file. The compact three-field form (`PERM <owner> all read`) is still
+/// emitted for whole-house rules and accepted on input, so documents written
+/// by v1.0 keep working.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Permission {
     pub scope: Scope,
@@ -88,13 +102,38 @@ pub struct Permission {
 
 impl Permission {
     pub fn to_line(&self, owner: &str) -> String {
-        let scope_str = match &self.scope {
-            Scope::All => "all".to_string(),
-            Scope::User(u) => format!("user:{u}"),
-            Scope::Path(p) => format!("path:{p}"),
-        };
-        format!("PERM {owner} {scope_str} {}", self.right.as_str())
+        match &self.scope {
+            Scope::All => format!("PERM {owner} all {}", self.right.as_str()),
+            Scope::User(u) => format!("PERM {owner} user:{u} {}", self.right.as_str()),
+            Scope::Path(p) => {
+                let p = normalize_acl_path(p);
+                if p.is_empty() {
+                    format!("PERM {owner} all {}", self.right.as_str())
+                } else {
+                    format!("PERM {owner} all {p} {}", self.right.as_str())
+                }
+            }
+            Scope::UserPath(u, p) => {
+                let p = normalize_acl_path(p);
+                if p.is_empty() {
+                    format!("PERM {owner} user:{u} {}", self.right.as_str())
+                } else {
+                    format!("PERM {owner} user:{u} {p} {}", self.right.as_str())
+                }
+            }
+        }
     }
+}
+
+/// Normalize a path for ACL comparison: no leading/trailing slashes, one
+/// separator between components. `/` (the whole house) becomes `""`.
+pub fn normalize_acl_path(path: &str) -> String {
+    path.trim()
+        .trim_matches('/')
+        .split('/')
+        .filter(|segment| !segment.is_empty() && *segment != ".")
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// Build a `adeia.hdap` document (unsigned in construction). `uuid` is an
@@ -1073,26 +1112,75 @@ impl TimiDoc {
 }
 
 /// Parse the canonical rights/scope from a stored `PERM ...` body value.
+///
+/// Accepted shapes:
+///
+/// * `PERM <owner> all <right>` — whole house, everyone (v1.0 form)
+/// * `PERM <owner> user:<id> <right>` — whole house, one user (v1.0 form)
+/// * `PERM <owner> path:<path> <right>` — one path, everyone (v1.0 form)
+/// * `PERM <owner> all <path> <right>` — one path, everyone (v1.001 form)
+/// * `PERM <owner> user:<id> <path> <right>` — one path, one user (v1.001)
+///
+/// A path may be `/` (whole house). `..` and `.` components are refused so a
+/// rule can never escape the owner's namespace through path arithmetic.
 pub fn parse_perm_line(line: &str) -> Option<(String, Result<Scope, ()>, Right)> {
     let parts: Vec<&str> = line.split_whitespace().collect();
-    if parts.len() != 4 || parts[0] != "PERM" {
+    if parts.len() < 4 || parts[0] != "PERM" {
         return None;
     }
     let owner = parts[1].to_string();
-    let scope = match parts[2] {
-        "all" => Ok(Scope::All),
-        s if s.starts_with("user:") => Ok(Scope::User(s[5..].to_string())),
-        s if s.starts_with("path:") => Ok(Scope::Path(s[5..].to_string())),
-        _ => Err(()),
-    };
-    let right = match parts[3] {
+    let right = match parts[parts.len() - 1] {
         "deny" => Right::Deny,
         "read" => Right::Read,
         "write" => Right::Write,
         "own" => Right::Own,
         _ => return None,
     };
+    let scope = match parts.len() {
+        // Legacy compact form: `PERM <owner> <scope-token> <right>`.
+        4 => match parts[2] {
+            "all" => Ok(Scope::All),
+            s if s.starts_with("user:") && s.len() > 5 => Ok(Scope::User(s[5..].to_string())),
+            s if s.starts_with("path:") => {
+                let p = checked_acl_path(&s[5..])?;
+                Ok(Scope::Path(p))
+            }
+            _ => Err(()),
+        },
+        // v1.001: `PERM <owner> <subject> <path> <right>`.
+        5 => {
+            let path = checked_acl_path(parts[3])?;
+            match parts[2] {
+                "all" => Ok(if path.is_empty() {
+                    Scope::All
+                } else {
+                    Scope::Path(path)
+                }),
+                s if s.starts_with("user:") && s.len() > 5 => {
+                    let id = s[5..].to_string();
+                    Ok(if path.is_empty() {
+                        Scope::User(id)
+                    } else {
+                        Scope::UserPath(id, path)
+                    })
+                }
+                _ => Err(()),
+            }
+        }
+        _ => Err(()),
+    };
     Some((owner, scope, right))
+}
+
+/// Validate and normalize a path from an ACL line. Returns `None` when the
+/// path tries to escape (`..`) or is absolute in a way that could address a
+/// sibling namespace.
+fn checked_acl_path(raw: &str) -> Option<String> {
+    let path = raw.trim();
+    if path.split('/').any(|segment| segment == "..") {
+        return None;
+    }
+    Some(normalize_acl_path(path))
 }
 
 #[cfg(test)]
@@ -1115,6 +1203,10 @@ mod tests {
                 scope: Scope::Path("/docs/videos".into()),
                 right: Right::Deny,
             },
+            Permission {
+                scope: Scope::UserPath("guest_bbbb".into(), "/docs/segredo.txt".into()),
+                right: Right::Deny,
+            },
         ];
         let doc = adeia_doc("jose_x", 1, None, 1_700_000_000, &perms, Some("u-4f8a"));
         let text = doc.render();
@@ -1129,6 +1221,42 @@ mod tests {
         assert_eq!(owner, "jose_x");
         assert_eq!(scope, Ok(Scope::All));
         assert_eq!(right, Right::Read);
+        // a user-scoped path rule survives the round trip
+        let l = back.body.get("PERM0003").unwrap();
+        assert_eq!(l, "PERM jose_x user:guest_bbbb docs/segredo.txt deny");
+        let (_, scope, right) = parse_perm_line(l).unwrap();
+        assert_eq!(
+            scope,
+            Ok(Scope::UserPath(
+                "guest_bbbb".into(),
+                "docs/segredo.txt".into()
+            ))
+        );
+        assert_eq!(right, Right::Deny);
+    }
+
+    #[test]
+    fn legacy_and_v1_001_acl_lines_parse_the_same_way() {
+        for (line, expected) in [
+            ("PERM alice all read", Ok(Scope::All)),
+            ("PERM alice user:bob read", Ok(Scope::User("bob".into()))),
+            ("PERM alice path:docs read", Ok(Scope::Path("docs".into()))),
+            ("PERM alice all docs read", Ok(Scope::Path("docs".into()))),
+            ("PERM alice all / read", Ok(Scope::All)),
+            (
+                "PERM alice user:bob docs/secret.txt deny",
+                Ok(Scope::UserPath("bob".into(), "docs/secret.txt".into())),
+            ),
+        ] {
+            let (owner, scope, _) = parse_perm_line(line).unwrap_or_else(|| panic!("{line}"));
+            assert_eq!(owner, "alice", "{line}");
+            assert_eq!(scope, expected, "{line}");
+        }
+        assert!(parse_perm_line("PERM alice user:bob ../escape read").is_none());
+        assert!(matches!(
+            parse_perm_line("PERM alice bogus read"),
+            Some((_, Err(()), _))
+        ));
     }
 
     #[test]

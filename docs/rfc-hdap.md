@@ -1,6 +1,6 @@
 # RFC-HDAP — Hsyst Descentralized Archive Protocol
 
-**HDAP v1.0 — Themelio · Veritas Aeterna**
+**HDAP v1.001 — Themelio · Epoptia**
 
 - **Status**: estável — release 1.0, implementado em `hdap-core`, `hdap-server`, `hdap-cli`, `hdap-tls` e `hdap-gui`.
 - **Última edição**: 2026-10-22.
@@ -82,8 +82,9 @@ Regras canônicas (violação é erro de parse):
 
 ### 5.1 `adeia` (ACL)
 - `UUID` opcional, estável entre edições (o encadeamento segue por `PREV_HASH`).
-- Linhas `PERM<idx>` canônicas: `PERM {owner} {scope} {right}`.
-- Direitos: `deny | read | write | own`. Escopos: `all | user:<id> | path:<prefixo>`.
+- Linhas `PERM<idx>` canônicas: `PERM {owner} {sujeito} {caminho} {direito}`. A forma compacta de v1.0 `PERM {owner} {scope} {right}` continua aceita.
+- Direitos: `deny | read | write | own`. Sujeitos: `all | user:<id>`. Caminhos: `/`, pasta (`docs/`) ou arquivo (`docs/segredo.txt`). O escopo legado `path:<prefixo>` é lido como sujeito `all` no caminho indicado.
+- Avaliação: caminho mais específico vence; no mesmo caminho `user:<id>` vence `all`; no mesmo nível de especificidade `deny` vence direitos positivos; ausência de regra que conceda = negar. `write` continua implicando `read` nesta versão.
 - `DIADOSI=white:<pyle>;...;` / `DIADOSI=black:<pyle>;...;` restringe replicação e leitura pelo `server_id` do pyle que copia/serve; docs públicos de identidade (`prosopeion.hdap`, `adeia.hdap`, `diadosi.hdap`) são isentos do filtro de leitura.
 
 ### 5.2 `mochthos` (banda)
@@ -158,7 +159,7 @@ Sucesso: `symbolon = HMAC(K, "hdap:session" ‖ server_id ‖ exp)`, exp default
 
 ## 10. Permissões e transferência
 
-- Autorização **sempre** pela identidade da sessão; nunca por *hint* do cliente; escopos de `adeia` decidem. Cruzamento sem permissão → `403`.
+- Autorização **sempre** pela identidade da sessão; nunca por *hint* do cliente; escopos de `adeia` decidem. Cruzamento sem permissão → `403`. A decisão usa caminho mais específico primeiro, sujeito `user:<id>` antes de `all`, e `deny` antes de direitos positivos no mesmo nível.
 - `DIADOSI` é um segundo filtro, por pyle (não por usuário): vale para leitura e replicação, inclusive snapshots antigos (`replica_acls`); só os documentos públicos de identidade escapam da leitura.
 - `metabibasis` (transferência de posse) é um **handshake assíncrono**: `POST /transfer/request` monta um manifesto assinado pelo cedente (slot 0) e contra-assinado pelo pyle de origem (slot 1); o pedido vai para `POST /transfer/inbox`; o cessionário assina o `ACCEPT` (slot 0), que o pyle de destino contra-assina (slot 1) e que embute o `REQUEST` exato + `REQUEST_HASH`. O alvo canônico é a URI `HDAP!<pyle>@<user>/<path>` e o rascunho carrega `TARGET_KIND` (`file`/`dir`/`identity`), `SCOPE*` (seleção original, cobre arquivos futuros) e o manifesto `TARGET*`/`DEST*`/`HASH*`/`SIZE*`.
 - A origem executa `lock_cessions` **antes** de copiar; mesmo pyle usa `complete_local`, pyles distintos usam `POST /transfer/complete` na origem e `POST /transfer/deliver` no destino. Cada byte é reconferido contra o hash/tamanho assinados.

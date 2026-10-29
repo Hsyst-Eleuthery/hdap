@@ -224,10 +224,19 @@ pub struct EditorState {
 }
 
 /// One ACL row, flattened for the form.
+///
+/// The row keeps the two coordinates separate on purpose. The old form had a
+/// single "scope" string (`all`, `user:aluno`, `path:docs`) and no path field,
+/// so there was no way to say "Maria may not read this file" — the exact bug
+/// this release fixes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermRow {
-    /// `all`, or a `user:<id>` / `path:<p>` scope.
-    pub scope: String,
+    /// `true` means the rule applies to everyone; `false` means `subject`.
+    pub everyone: bool,
+    /// Global user id (without `user:`) when `everyone` is false.
+    pub subject: String,
+    /// `/` or empty means the whole house; otherwise a folder or file.
+    pub path: String,
     /// Right: `deny|read|write|own`.
     pub right: String,
 }
@@ -235,16 +244,55 @@ pub struct PermRow {
 impl Default for PermRow {
     fn default() -> Self {
         Self {
-            scope: "all".into(),
+            everyone: true,
+            subject: String::new(),
+            path: "/".into(),
             right: "read".into(),
         }
     }
 }
 
 impl PermRow {
-    /// Render back to the canonical `PERM <owner> <scope> <right>` line.
-    pub fn to_line(&self, owner: &str) -> String {
-        format!("PERM {owner} {} {}", self.scope.trim(), self.right.trim())
+    /// Project the row onto the protocol's scope model.
+    pub fn scope(&self) -> Scope {
+        let subject = self
+            .subject
+            .trim()
+            .strip_prefix("user:")
+            .unwrap_or(self.subject.trim())
+            .to_string();
+        let path = hdap_core::protocol::normalize_acl_path(
+            self.path
+                .trim()
+                .strip_prefix("path:")
+                .unwrap_or(self.path.trim()),
+        );
+        match (self.everyone || subject.is_empty(), path.is_empty()) {
+            (true, true) => Scope::All,
+            (true, false) => Scope::Path(path),
+            (false, true) => Scope::User(subject),
+            (false, false) => Scope::UserPath(subject, path),
+        }
+    }
+
+    /// Render back to a canonical `PERM <owner> <sujeito> <caminho> <right>`
+    /// line. Returns `None` when the right is not one of the four protocol
+    /// values.
+    pub fn to_line(&self, owner: &str) -> Option<String> {
+        let right = RIGHTS
+            .iter()
+            .find(|r| **r == self.right.trim())
+            .map(|r| match *r {
+                "deny" => Right::Deny,
+                "read" => Right::Read,
+                "write" => Right::Write,
+                _ => Right::Own,
+            })?;
+        let permission = Permission {
+            scope: self.scope(),
+            right,
+        };
+        Some(permission.to_line(owner))
     }
 }
 
@@ -263,25 +311,33 @@ impl EditorState {
 
 const RIGHTS: [&str; 4] = ["deny", "read", "write", "own"];
 
-/// Parse a `PERM <owner> <scope> <right>` line back into a form row.
+/// Localized label for a right token.
+pub fn right_label(strings: &crate::i18n::Strings, right: &str) -> &'static str {
+    match right {
+        "deny" => strings.f_perm_right_deny,
+        "write" => strings.f_perm_right_write,
+        "own" => strings.f_perm_right_own,
+        _ => strings.f_perm_right_read,
+    }
+}
+
+/// Parse a `PERM <owner> <scope> <right>` line back into a form row. The core
+/// parser owns the grammar, so the form accepts both the v1.0 compact lines
+/// and the v1.001 subject + path lines.
 fn parse_perm_row(line: &str) -> Option<PermRow> {
-    let rest = line.strip_prefix("PERM ")?;
-    let mut it = rest.split_whitespace();
-    let _owner = it.next()?;
-    let scope = it.next()?;
-    let right = it.next()?;
-    if it.next().is_some() {
-        return None;
-    }
-    if !RIGHTS.contains(&right) {
-        return None;
-    }
-    if scope != "all" && !scope.starts_with("user:") && !scope.starts_with("path:") {
-        return None;
-    }
+    let (_owner, scope, right) = hdap_core::protocol::parse_perm_line(line)?;
+    let scope = scope.ok()?;
+    let (subject, path) = match scope {
+        Scope::All => (String::new(), "/".to_string()),
+        Scope::User(user) => (user, "/".to_string()),
+        Scope::Path(path) => (String::new(), format!("/{}", path.trim_matches('/'))),
+        Scope::UserPath(user, path) => (user, format!("/{}", path.trim_matches('/'))),
+    };
     Some(PermRow {
-        scope: scope.to_string(),
-        right: right.to_string(),
+        everyone: subject.is_empty(),
+        subject,
+        path,
+        right: right.as_str().to_string(),
     })
 }
 
@@ -290,14 +346,6 @@ fn parse_perm_row(line: &str) -> Option<PermRow> {
 fn build_adeia(owner: &str, rows: &[PermRow], base: &Doc) -> Option<Doc> {
     let mut perms = Vec::new();
     for row in rows {
-        let scope = if row.scope.trim() == "all" {
-            Scope::All
-        } else if let Some(u) = row.scope.trim().strip_prefix("user:") {
-            Scope::User(u.trim().to_string())
-        } else {
-            let p = row.scope.trim().strip_prefix("path:")?;
-            Scope::Path(p.trim().to_string())
-        };
         let right = RIGHTS
             .iter()
             .find(|r| **r == row.right.trim())
@@ -307,7 +355,10 @@ fn build_adeia(owner: &str, rows: &[PermRow], base: &Doc) -> Option<Doc> {
                 "write" => Right::Write,
                 _ => Right::Own,
             })?;
-        perms.push(Permission { scope, right });
+        perms.push(Permission {
+            scope: row.scope(),
+            right,
+        });
     }
     // Keep every body key the form does not own (notably `UUID`, §4.3).
     let mut d = base.clone();
@@ -780,53 +831,90 @@ pub fn render(ui: &mut egui::Ui, app: &mut App) {
         Form::Raw => {}
         Form::Perms(rows) => {
             ui.label(RichText::new(app.strings.f_adeia_title).strong());
-            ui.label(RichText::new(app.strings.f_adeia_hint).small().weak());
+            ui.add(
+                egui::Label::new(
+                    RichText::new(app.strings.f_adeia_hint)
+                        .small()
+                        .color(crate::theme::VIOLET_MUTED),
+                )
+                .wrap(),
+            );
+            if rows.is_empty() {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(app.strings.f_perm_empty)
+                            .small()
+                            .color(crate::theme::VIOLET_MUTED),
+                    )
+                    .wrap(),
+                );
+            }
             let mut remove: Option<usize> = None;
             for (i, row) in rows.iter_mut().enumerate() {
-                ui.horizontal(|ui| {
-                    ui.label(format!("{}", i + 1));
-                    let before = (row.scope.clone(), row.right.clone());
-                    egui::ComboBox::from_id_salt(("scope", i))
-                        .width(62.0)
-                        .selected_text(row.scope.clone())
-                        .show_ui(ui, |ui| {
-                            for s in ["all", "user:", "path:"] {
-                                ui.selectable_value(&mut row.scope, s.to_string(), s);
+                let before = row.clone();
+                egui::Frame::group(ui.style())
+                    .inner_margin(egui::Margin::symmetric(6, 4))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(format!("#{}", i + 1)).small().weak());
+                            ui.label(RichText::new(app.strings.f_perm_who).small());
+                            egui::ComboBox::from_id_salt(("perm_who", i))
+                                .width(82.0)
+                                .selected_text(if row.everyone {
+                                    app.strings.f_perm_all
+                                } else {
+                                    app.strings.f_perm_user
+                                })
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        &mut row.everyone,
+                                        true,
+                                        app.strings.f_perm_all,
+                                    );
+                                    ui.selectable_value(
+                                        &mut row.everyone,
+                                        false,
+                                        app.strings.f_perm_user,
+                                    );
+                                });
+                            ui.label(RichText::new(app.strings.f_perm_right).small());
+                            egui::ComboBox::from_id_salt(("perm_right", i))
+                                .width(78.0)
+                                .selected_text(right_label(app.strings, &row.right))
+                                .show_ui(ui, |ui| {
+                                    for r in RIGHTS {
+                                        let label = right_label(app.strings, r);
+                                        ui.selectable_value(&mut row.right, r.to_string(), label);
+                                    }
+                                });
+                            if ui.small_button("✕").clicked() {
+                                remove = Some(i);
                             }
                         });
-                    // Keep the row inside the 360px panel: reserve room for the
-                    // right-hand combo and the delete button, then let the scope
-                    // field take what is left. Without this the two default-width
-                    // combos + a fixed 90px field made the row ~370px wide, which
-                    // pushed the whole panel off the right edge of the window.
-                    let reserved = 62.0 + 24.0 + 2.0 * ui.spacing().item_spacing.x;
-                    let scope_w = (ui.available_width() - reserved).max(60.0);
-                    if egui::TextEdit::singleline(&mut row.scope)
-                        .desired_width(scope_w)
-                        .hint_text(app.strings.h_scope)
-                        .show(ui)
-                        .response
-                        .changed()
-                    {
-                        changed = true;
-                    }
-                    egui::ComboBox::from_id_salt(("right", i))
-                        .width(62.0)
-                        .selected_text(row.right.clone())
-                        .show_ui(ui, |ui| {
-                            for r in RIGHTS {
-                                ui.selectable_value(&mut row.right, r.to_string(), r);
-                            }
+                        if !row.everyone {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(app.strings.f_perm_user_id).small());
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut row.subject)
+                                        .desired_width(ui.available_width())
+                                        .hint_text(app.strings.h_perm_user),
+                                );
+                            });
+                        }
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(app.strings.f_perm_where).small());
+                            ui.add(
+                                egui::TextEdit::singleline(&mut row.path)
+                                    .desired_width(ui.available_width())
+                                    .hint_text(app.strings.h_perm_path),
+                            );
                         });
-                    // A combo writes the field directly, so diff the value
-                    // instead of trusting `TextEdit` to notice for us.
-                    if before != (row.scope.clone(), row.right.clone()) {
-                        changed = true;
-                    }
-                    if ui.small_button("✕").clicked() {
-                        remove = Some(i);
-                    }
-                });
+                    });
+                // Combos and text fields write the row directly; diff the
+                // whole row so any edit reaches the document text.
+                if before != *row {
+                    changed = true;
+                }
             }
             if let Some(i) = remove {
                 rows.remove(i);
@@ -836,6 +924,14 @@ pub fn render(ui: &mut egui::Ui, app: &mut App) {
                 rows.push(PermRow::default());
                 changed = true;
             }
+            ui.add(
+                egui::Label::new(
+                    RichText::new(app.strings.f_perm_precedence)
+                        .small()
+                        .color(crate::theme::VIOLET_MUTED),
+                )
+                .wrap(),
+            );
         }
         Form::Kerux { alias, target_uri } => {
             ui.label(RichText::new(app.strings.f_kerux_title).strong());
@@ -1357,11 +1453,33 @@ mod tests {
     fn rows(perms: &[(&str, &str)]) -> Vec<PermRow> {
         perms
             .iter()
-            .map(|(s, r)| PermRow {
-                scope: s.to_string(),
-                right: r.to_string(),
+            .map(|(s, r)| {
+                let (everyone, subject, path) = if *s == "all" {
+                    (true, String::new(), "/".to_string())
+                } else if let Some(u) = s.strip_prefix("user:") {
+                    (false, u.to_string(), "/".to_string())
+                } else if let Some(p) = s.strip_prefix("path:") {
+                    (true, String::new(), format!("/{p}"))
+                } else {
+                    panic!("unknown scope in test: {s}")
+                };
+                PermRow {
+                    everyone,
+                    subject,
+                    path,
+                    right: r.to_string(),
+                }
             })
             .collect()
+    }
+
+    fn rule(subject: &str, path: &str, right: &str) -> PermRow {
+        PermRow {
+            everyone: subject.is_empty(),
+            subject: subject.to_string(),
+            path: path.to_string(),
+            right: right.to_string(),
+        }
     }
 
     fn adeia_text(perms: &[(&str, &str)]) -> String {
@@ -1407,6 +1525,42 @@ mod tests {
         assert_eq!(
             form_perms(&st),
             rows(&[("user:aluno", "write"), ("path:docs", "own")])
+        );
+    }
+
+    #[test]
+    fn a_user_can_be_denied_on_one_file_without_losing_the_house() {
+        let t = build_adeia(
+            "alice",
+            &[
+                rule("", "/", "read"),
+                rule("maria", "docs/segredo.txt", "deny"),
+            ],
+            &base_of(Template::Adeia),
+        )
+        .unwrap()
+        .render();
+        let d = doc::parse(&t).expect("form output must be a valid doc");
+        assert_eq!(
+            d.body.get("PERM0000").map(String::as_str),
+            Some("PERM alice all read")
+        );
+        assert_eq!(
+            d.body.get("PERM0001").map(String::as_str),
+            Some("PERM alice user:maria docs/segredo.txt deny")
+        );
+        // The form must show the same two rows when the document is reopened.
+        let mut st = EditorState {
+            text: t,
+            ..Default::default()
+        };
+        reparse(&mut st);
+        assert_eq!(
+            form_perms(&st),
+            vec![
+                rule("", "/", "read"),
+                rule("maria", "/docs/segredo.txt", "deny")
+            ]
         );
     }
 
@@ -1643,8 +1797,19 @@ mod tests {
         assert_eq!(
             parse_perm_row("PERM alice path:docs own"),
             Some(PermRow {
-                scope: "path:docs".into(),
+                everyone: true,
+                subject: String::new(),
+                path: "/docs".into(),
                 right: "own".into()
+            })
+        );
+        assert_eq!(
+            parse_perm_row("PERM alice user:maria docs/segredo.txt deny"),
+            Some(PermRow {
+                everyone: false,
+                subject: "maria".into(),
+                path: "/docs/segredo.txt".into(),
+                right: "deny".into()
             })
         );
     }

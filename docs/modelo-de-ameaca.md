@@ -1,8 +1,8 @@
 # HDAP — Modelo de Ameaça
 
-**HDAP v1.0 — Themelio · Veritas Aeterna**
+**HDAP v1.001 — Themelio · Epoptia**
 
-> Revisão de 2026-10-22 · Protocolo: **1.0**. Complementa a [Especificação Formal](especificacao-hdap.md). O vocabulário grego segue o [Léxico Grego](lexico-grego.md), em transliteração ASCII.
+> Revisão de 2026-10-29 · Protocolo: **1.0** (matriz v1). Complementa a [Especificação Formal](especificacao-hdap.md). O vocabulário grego segue o [Léxico Grego](lexico-grego.md), em transliteração ASCII.
 > Princípio: propriedades de segurança **concretas e verificáveis**; nada de "não pode ser hackeado".
 
 ---

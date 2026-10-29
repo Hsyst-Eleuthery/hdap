@@ -2,6 +2,23 @@
 
 O HDAP usa dois codinomes por lançamento. O **codinome de protocolo** nomeia uma geração da linguagem do protocolo e muda apenas quando a forma de comunicação ou de interpretação dos documentos muda. O **codinome de lançamento** nomeia o pacote e muda em qualquer release. A versão 1.0 é o marco zero, com o protocolo **Themelio** e o lançamento **Veritas Aeterna**. Correções que não alteram o protocolo saem como `v1.001`, `v1.002` e assim por diante, com um novo codinome de lançamento e o mesmo codinome de protocolo. Mudanças de protocolo abrem uma versão maior, como `v2.0`, e os dois codinomes mudam. Toda release atualiza a documentação.
 
+## v1.001 — 2026-10-29
+
+Release de correção de interface. Codinome de protocolo: **Themelio** (matriz v1). Codinome de lançamento: **Epoptia**. A matriz de documentos e rotas continua em v1; esta release corrige a avaliação e a edição das permissões (`adeia`).
+
+### Permissões (`adeia`)
+
+- `deny` deixou de ser ignorado. A avaliação agora aplica a precedência documentada: caminho mais específico vence (arquivo > pasta > raiz), `user:<id>` vence `all` no mesmo caminho, `deny` vence direitos positivos no mesmo nível e a ausência de regra nega.
+- A gramática ganhou a forma completa `PERM <owner> <sujeito> <caminho> <direito>`, que permite negar um arquivo a uma pessoa sem fechar a casa inteira. As linhas compactas de v1.0 continuam aceitas e seguem sendo emitidas para regras de casa inteira.
+- O editor de `adeia` na GUI foi refeito em três campos explícitos — **Quem**, **Onde** e **Pode** — com escolha entre Todos/Usuário, caminho de arquivo ou pasta e direitos localizados (Negar, Ler, Escrever, Dono). O formulário lê e reescreve tanto documentos antigos quanto novos.
+- Regras de caminho agora respeitam limites de componente: `docs` cobre `docs/a.txt` mas não `docs2/a.txt`.
+- Testes de servidor cobrem negação por arquivo, negação por pasta, exceção mais específica e isolamento entre usuários.
+
+### Documentação
+
+- Guia do usuário, manual técnico, especificação e RFC atualizados com a gramática, a precedência e os exemplos corretos de `PERM`.
+- Cabeçalhos e notas de versão apontam para `v1.001` / **Epoptia**, mantendo o protocolo **Themelio**.
+
 ## 1.0.0 — 2026-10-21
 
 Primeira release de produção do HDAP. Codinome de protocolo: **Themelio**. Codinome de lançamento: **Veritas Aeterna**.

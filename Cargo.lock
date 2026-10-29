@@ -1854,7 +1854,7 @@ dependencies = [
 
 [[package]]
 name = "hdap-cli"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -1870,7 +1870,7 @@ dependencies = [
 
 [[package]]
 name = "hdap-core"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "argon2",
  "base64",
@@ -1886,7 +1886,7 @@ dependencies = [
 
 [[package]]
 name = "hdap-gui"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -1906,7 +1906,7 @@ dependencies = [
 
 [[package]]
 name = "hdap-server"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -1924,7 +1924,7 @@ dependencies = [
 
 [[package]]
 name = "hdap-tls"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "hex",
  "rcgen",

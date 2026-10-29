@@ -1,6 +1,6 @@
 # Manual Técnico — HDAP
 
-**HDAP v1.0 — Themelio · Veritas Aeterna**
+**HDAP v1.001 — Themelio · Epoptia**
 
 **Escrito por Thaís (op3n/op3ny)**
 
@@ -89,7 +89,7 @@ Todo objeto relevante do protocolo é um documento textual canônico:
 # CREATED_AT: 1737500000
 ### :END HEAD
 ### BODY:
-# PERM all / read
+# PERM0000: PERM thais_a3f9c2d1e0b7aa11 all / read
 ### :END BODY
 ### SIGS:
 # SIGNER: thais_a3f9c2d1e0b7aa11
@@ -172,12 +172,12 @@ A leitura passa por `authorize`, que responde a uma pergunta objetiva: **a ident
 A `adeia.hdap` é uma ACL declarativa e pública:
 
 ```
-PERM all / read
-PERM user:<user_id> docs/ write
-PERM user:<user_id> docs/privado.txt deny
+PERM <owner> all / read
+PERM <owner> user:<user_id> docs/ write
+PERM <owner> user:<user_id> docs/privado.txt deny
 ```
 
-As regras são avaliadas do caminho mais específico para o mais geral, e o sujeito é sempre a identidade autenticada — nunca um campo que o cliente enviou no corpo da requisição.
+Cada linha tem sujeito (`all` ou `user:<id>`), caminho (`/`, pasta ou arquivo) e direito (`deny|read|write|own`). As regras são avaliadas do caminho mais específico para o mais geral; no mesmo caminho, um sujeito `user:<id>` vence `all` e `deny` vence os direitos positivos. Sem regra que conceda o pedido, a resposta é negativa. O sujeito é sempre a identidade autenticada — nunca um campo que o cliente enviou no corpo da requisição. A forma compacta de v1.0 (`PERM <owner> all read`) continua aceita.
 
 O dono pode editar a ACL, mas não pode usar isso para desfazer uma transferência já concluída. Transferências gravam uma cessão (`ceession`) antes de copiar; a checagem de cessão é independente do texto da `adeia`. É isso que torna o read-only do cedente **irrevogável** sem depender de promessa.
 

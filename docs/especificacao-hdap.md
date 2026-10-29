@@ -1,8 +1,8 @@
 # HDAP — Especificação Formal
 
-**HDAP v1.0 — Themelio · Veritas Aeterna**
+**HDAP v1.001 — Themelio · Epoptia**
 
-> Revisão de 2026-10-22 · Protocolo: **1.0** · Status: **normativa e estável**. O documento adota o vocabulário grego canônico definido em [lexico-grego.md](lexico-grego.md).
+> Revisão de 2026-10-29 · Protocolo: **1.0** (matriz v1) · Status: **normativa e estável**. O documento adota o vocabulário grego canônico definido em [lexico-grego.md](lexico-grego.md).
 >
 > **Autoridade documental.** Este documento é a **fonte normativa única** da *semântica* do protocolo: o que DEVE ser verdade sobre identidade, sessão, permissões, banda, matriz e deleção. O [RFC-HDAP](rfc-hdap.md) é normativo apenas para o **formato de fio e rotas** e não pode contradizer esta especificação. O [Modelo de Ameaça](modelo-de-ameaca.md) é normativo para os requisitos de segurança (`AME-*`). O [Léxico Grego](lexico-grego.md) é normativo para terminologia. Exemplos usam `VERSION: 1`, a versão do formato de documento, distinta da versão do protocolo.
 
@@ -212,7 +212,8 @@ O desenho do 3FA parte de três exigências que precisam valer ao mesmo tempo. A
 
 ## 8. Permissões (`adeia.hdap`)
 
-- A `adeia` é uma ACL declarativa e pública: `PERM all <caminho|/> <deny|read|write|own>` / `PERM user:<guest_id> <caminho> <direito>`.
+- A `adeia` é uma ACL declarativa e pública. A linha canônica é `PERM <owner> <sujeito> <caminho> <direito>`, onde `sujeito` é `all` ou `user:<guest_id>`, `caminho` é `/`, uma pasta (`docs/`) ou um arquivo (`docs/segredo.txt`), e `direito` é `deny|read|write|own`. A forma compacta de v1.0 (`PERM <owner> all read`, `PERM <owner> user:<id> read`, `PERM <owner> path:<p> read`) continua aceita e é emitida para regras de casa inteira, para que documentos antigos sigam válidos.
+- A avaliação é determinística e conservadora: **(1)** a regra do caminho mais específico vence (arquivo > pasta > raiz); **(2)** no mesmo caminho, `user:<id>` vence `all`; **(3)** no mesmo nível de especificidade, `deny` vence qualquer direito positivo; **(4)** sem regra que conceda o direito pedido, a resposta é negativa. Assim, liberar a casa com `PERM all / read` e negar um arquivo a uma pessoa com `PERM user:<id> docs/segredo.txt deny` funciona sem fechar o resto da casa.
 - A mesma `adeia` pode declarar **`DIADOSI=white:<pyle>;<pyle>;`** ou **`DIADOSI=black:<pyle>;<pyle>;`**. A lista é avaliada contra o `server_id` do pyle que **replica** ou **serve** o namespace: `white` só permite os listados; `black` nega os listados. O filtro vale para cópia (`store_namespace`/`fed_fetch_blob`) e leitura (`authorize`/`authorize_replica`), inclusive réplicas antigas do Cenário B. Documentos públicos de identidade (`prosopeion.hdap`, `adeia.hdap`, `diadosi.hdap`) são isentos do filtro de leitura.
 - **O sujeito da decisão é a identidade autenticada na sessão** (7.2). O servidor decide `requester ∈ allowed(scopes)` usando o `prosopeion` da sessão — nunca um campo forjado pelo cliente.
 - Para convites federativos (E2E), mantém-se a derivação `shared = X25519(priv_anfitrião, pub_convidado)` **exclusivamente para cifragem de conteúdo compartilhado**, não para autorizar: prova de autenticidade continua sendo a `sphragis` da sessão (Desafio-resposta). O servidor **não verifica hint**; só a identidade da sessão.

@@ -1,8 +1,8 @@
 # HDAP — Λεξικόν (Léxico Grego Canônico)
 
-**HDAP v1.0 — Themelio · Veritas Aeterna**
+**HDAP v1.001 — Themelio · Epoptia**
 
-> Revisão de 2026-10-22 · Protocolo: **1.0**. O projeto se chama HDAP, mas todos os conceitos de protocolo, as superfícies de rede (tipos de documento, rotas REST, nomes de arquivo, chaves de configuração) e os identificadores de implementação carregam **nomes gregos transliterados**. Os glifos gregos são a forma canônica exibida na tabela; o código usa a transliteração ASCII em minúsculas, com `snake_case` para funções e variáveis e `CamelCase` para tipos.
+> Revisão de 2026-10-29 · Protocolo: **1.0** (matriz v1). O projeto se chama HDAP, mas todos os conceitos de protocolo, as superfícies de rede (tipos de documento, rotas REST, nomes de arquivo, chaves de configuração) e os identificadores de implementação carregam **nomes gregos transliterados**. Os glifos gregos são a forma canônica exibida na tabela; o código usa a transliteração ASCII em minúsculas, com `snake_case` para funções e variáveis e `CamelCase` para tipos.
 >
 > A regra do léxico é evitar nomes óbvios e clichês, como *agora*, *arete*, *ethos*, *logos*, *xenia*, *polis*, *nemesis* ou *phoenix*. Cada termo foi escolhido pela etimologia e serve à tese econômica do projeto: preço como sinal, reputação como capital e ordem espontânea.
 

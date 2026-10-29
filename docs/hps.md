@@ -1,6 +1,6 @@
 # HPS — o projeto predecessor
 
-**HDAP v1.0 — Themelio · Veritas Aeterna**
+**HDAP v1.001 — Themelio · Epoptia**
 
 **Escrito por Thaís (op3n/op3ny)**
 

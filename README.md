@@ -4,7 +4,7 @@
 
 oie, eu sou a **Thaís (op3n/op3ny)**. O HDAP nasceu de uma pergunta simples: como guardar arquivos de um jeito em que a posse, a autoria e a história não dependam da boa vontade de uma empresa? A resposta não foi criar mais uma nuvem — foi criar um protocolo pequeno o suficiente para ser entendido e forte o suficiente para ser verificado.
 
-Esta é a versão **1.0**, o marco zero do protocolo. O codinome de protocolo é **Themelio**, que significa "Marco Zero", e o codinome de lançamento é **Veritas Aeterna**, "verdade eterna".
+Esta é a versão **v1.001**, o primeiro lançamento de correção do protocolo. O codinome de protocolo continua **Themelio** (matriz v1), que significa "Marco Zero", e o codinome de lançamento é **Epoptia**. A v1.0 foi o marco zero com o lançamento **Veritas Aeterna**; a v1.001 corrige a interface e a avaliação das permissões (`adeia`) sem romper documentos existentes.
 
 [![CI](https://github.com/Hsyst-Eleuthery/hdap/actions/workflows/ci.yml/badge.svg)](https://github.com/Hsyst-Eleuthery/hdap/actions/workflows/ci.yml)
 [![Licença: MIT](https://img.shields.io/badge/licen%C3%A7a-MIT-blue.svg)](LICENSE)
@@ -35,11 +35,13 @@ Essa inversão tem um custo, e o custo é a responsabilidade. Não existe "esque
 
 ## O que já está implementado
 
-A versão 1.0 entrega o protocolo completo e os três programas que o tornam utilizável. A **identidade criptográfica** usa Ed25519 para assinatura e X25519 para o transporte, com um cofre local `krypte.hdap` protegido por Argon2id e ChaCha20-Poly1305. O **login 3FA por nó** combina assinatura de desafio, OTP em cadeia de hash e prova de conhecimento da chave de transporte. Os **documentos `.hdap`** são canônicos, assinados e versionados por `PREV_HASH`. Os **arquivos** carregam hash, assinatura e uma matriz de origem chamada `prytaneion`. As **permissões** são declaradas em `adeia.hdap`, por arquivo, pasta ou identidade, com escopo e expiração.
+A versão 1.0 entregou o protocolo completo e os três programas que o tornam utilizável. A **identidade criptográfica** usa Ed25519 para assinatura e X25519 para o transporte, com um cofre local `krypte.hdap` protegido por Argon2id e ChaCha20-Poly1305. O **login 3FA por nó** combina assinatura de desafio, OTP em cadeia de hash e prova de conhecimento da chave de transporte. Os **documentos `.hdap`** são canônicos, assinados e versionados por `PREV_HASH`. Os **arquivos** carregam hash, assinatura e uma matriz de origem chamada `prytaneion`. As **permissões** são declaradas em `adeia.hdap`, por arquivo, pasta ou identidade, com escopo e expiração.
 
 A camada econômica existe e é funcional. A **banda** é gerada por prova de trabalho (`mochthos`), consumida por um tratado de cessão (`syngraphe`) e limitada por uma cota de armazenamento (`moira`). A **replicação federada** usa handshake assinado, TLS pinado e verificação de hash em cada cópia. A **busca por hash** consulta o cache local, o livro global, a origem e as réplicas. A **transferência de posse** (`metabibasis`) é assíncrona e garante leitura irrevogável ao cedente. A **mudança de casa** (`house_move`) é assinada pelo usuário e funciona mesmo com a origem offline. A **sucessão de casa** (`diadosi.hdap`) permite que fallbacks assumam quando o pyle principal morre. O **DDNS interno** (`kerux`) oferece aliases verificáveis para URIs `HDAP!`. E o **filtro de replicação e leitura por pyle** (`DIADOSI=white/black`) permite restringir onde a casa circula.
 
 Na ponta, há três portas de entrada que falam o mesmo protocolo. O **hdap-gui** é o aplicativo de desktop, em português, inglês, espanhol e francês, com explorador de arquivos, editor de documentos, painel de configuração, busca por hash e resolução de alias na barra de endereço. O **hdap-cli** serve para automação e operação em servidores. E o **hdap-server** é o pyle, a peça que guarda conteúdo e participa da federação.
+
+A **v1.001 (Epoptia)** corrige a experiência de permissões. Negar um arquivo a uma pessoa agora funciona de verdade: a avaliação respeita caminho mais específico, sujeito `user:<id>` antes de `all` e `deny` antes de direitos positivos. A GUI passou a editar cada regra em três campos explícitos — **Quem**, **Onde** e **Pode** — e continua lendo as linhas compactas de v1.0.
 
 ---
 
@@ -84,7 +86,7 @@ A confiança não é uma promessa: é uma sequência de provas que qualquer clie
 
 ### Baixar uma versão pronta
 
-Os pacotes de cada sistema ficam em **[Releases](https://github.com/Hsyst-Eleuthery/hdap/releases)**. Para Linux x86_64 com biblioteca estática, baixe `hdap-1.0.0-x86_64-unknown-linux-musl.tar.gz`, que é a opção mais portátil e não depende da glibc do sistema. Para Linux x86_64 com glibc, baixe `hdap-1.0.0-x86_64-unknown-linux-gnu.tar.gz`. Para Windows x86_64, baixe `hdap-1.0.0-x86_64-pc-windows-gnu.zip`. Cada pacote inclui `hdap-server`, `hdap-gui` e `hdap-cli` — com a extensão `.exe` no Windows — e um checksum SHA-256. Confira o checksum antes de executar qualquer binário.
+Os pacotes de cada sistema ficam em **[Releases](https://github.com/Hsyst-Eleuthery/hdap/releases)**. A release **v1.001 (Epoptia)** é empacotada como `1.0.1`. Para Linux x86_64 com biblioteca estática, baixe `hdap-1.0.1-x86_64-unknown-linux-musl.tar.gz`, que é a opção mais portátil e não depende da glibc do sistema. Para Linux x86_64 com glibc, baixe `hdap-1.0.1-x86_64-unknown-linux-gnu.tar.gz`. Para Windows x86_64, baixe `hdap-1.0.1-x86_64-pc-windows-gnu.zip`. Cada pacote inclui `hdap-server`, `hdap-gui` e `hdap-cli` — com a extensão `.exe` no Windows — e um checksum SHA-256. Confira o checksum antes de executar qualquer binário.
 
 ### Compilar do código
 
@@ -222,7 +224,7 @@ Esses limites estão documentados em detalhe no **[Modelo de Ameaça](docs/model
 
 ## Versionamento e codinomes
 
-Todo lançamento do HDAP carrega dois codinomes. O **codinome de protocolo** dá nome a uma geração da linguagem do protocolo e muda apenas quando a forma como os nós conversam ou como os documentos são interpretados muda. O **codinome de lançamento** dá nome ao pacote como um todo e muda em qualquer release, inclusive nas correções que não tocam o protocolo. A versão 1.0 é o marco zero, com o protocolo **Themelio** e o lançamento **Veritas Aeterna**.
+Todo lançamento do HDAP carrega dois codinomes. O **codinome de protocolo** dá nome a uma geração da linguagem do protocolo e muda apenas quando a forma como os nós conversam ou como os documentos são interpretados muda. O **codinome de lançamento** dá nome ao pacote como um todo e muda em qualquer release, inclusive nas correções que não tocam o protocolo. A versão 1.0 é o marco zero, com o protocolo **Themelio** e o lançamento **Veritas Aeterna**; a versão **v1.001** mantém o protocolo **Themelio** (matriz v1) e usa o lançamento **Epoptia**.
 
 As regras valem para sempre. Correções, melhorias de interface, correções de bug, vulnerabilidades, documentação e empacotamento saem como `v1.001`, `v1.002`, `v1.003` e assim por diante, e apenas o codinome de lançamento muda. Mudanças de protocolo abrem uma versão nova, como `v2.0`, e nesse caso os dois codinomes mudam. Toda release atualiza a documentação, declara os dois codinomes e ajusta as datas de revisão. O histórico completo fica no **[CHANGELOG](CHANGELOG.md)**.
 
