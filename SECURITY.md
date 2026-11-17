@@ -1,6 +1,6 @@
 # Segurança do HDAP
 
-**HDAP v1.001 — Themelio · Epoptia** · Revisão de 2026-10-29.
+**HDAP v2.0 — Téleia vási · Teleios** · Revisão de 2026-11-17.
 
 ## Como reportar
 
@@ -26,8 +26,12 @@ Você receberá uma confirmação de recebimento. O objetivo é responder em at�
 
 Fazem parte do escopo:
 
-- autenticação 3FA e gerenciamento de sessão;
-- cofre local `krypte.hdap`;
+- autenticação 3FA e gerenciamento de sessão, incluindo o vínculo do F3 ao desafio emitido pelo servidor e o teto da cadeia OTP;
+- rotação OMPHALOS (`POST /omphalos`) e a assinatura de identidade que a autoriza;
+- chave mestra externa (`--master-key-file`), redaction do DB e hash das sessões em repouso;
+- tempo Unix UTC, `X-HDAP-Server-Time` e a tolerância de relógio da federação;
+- limites de conexão, rate limiting por IP do socket e limpeza de desafios/sessões expirados;
+- cofre local `krypte.hdap`, incluindo o formato v2 e a leitura de cofres v1;
 - formato e canonicalização de documentos `.hdap`;
 - permissões (`adeia`) e transferência de posse;
 - federação, handshake e replicação;
@@ -48,7 +52,7 @@ Esses limites estão descritos no [Modelo de Ameaça](docs/modelo-de-ameaca.md).
 
 ## Versões suportadas
 
-A linha 1.0 recebe correções de segurança em releases `v1.001`, `v1.002` e assim por diante. O codinome de protocolo permanece **Themelio** nessas correções; apenas o codinome de lançamento muda. Mudanças de protocolo abrem uma versão maior, como `v2.0`, com os dois codinomes novos. Versões anteriores à 1.0 não são suportadas e devem ser atualizadas. Ao reportar, informe a versão exata impressa por `hdap-server --version`, `hdap-cli --version` ou no rodapé da GUI.
+A linha 2.x recebe correções de segurança em releases `v2.001`, `v2.002` e assim por diante. O codinome de protocolo permanece **Teleios** nessas correções; apenas o codinome de lançamento muda. Mudanças na linguagem do protocolo abrem a próxima versão maior, com os dois codinomes novos. A linha 1.x (Themelio · Epoptia) encerrou sua manutenção com a v2.0: documentos e cofres v1 continuam legíveis, mas correções de segurança saem apenas na linha 2.x. Versões anteriores à 1.0 não são suportadas. Ao reportar, informe a versão exata impressa por `hdap-server --version`, `hdap-cli --version` ou no rodapé da GUI e, quando possível, os campos `protocol_version` e `protocol_codename` de `GET /health`.
 
 ## Divulgação responsável
 

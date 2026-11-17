@@ -1,8 +1,8 @@
 # HDAP — Especificação Formal
 
-**HDAP v1.001 — Themelio · Epoptia**
+**HDAP v2.0 — Téleia vási · Teleios**
 
-> Revisão de 2026-10-29 · Protocolo: **1.0** (matriz v1) · Status: **normativa e estável**. O documento adota o vocabulário grego canônico definido em [lexico-grego.md](lexico-grego.md).
+> Revisão de 2026-11-17 · Protocolo: **2.0** (Téleia vási / Teleios) · Status: **normativa e estável**. O documento adota o vocabulário grego canônico definido em [lexico-grego.md](lexico-grego.md).
 >
 > **Autoridade documental.** Este documento é a **fonte normativa única** da *semântica* do protocolo: o que DEVE ser verdade sobre identidade, sessão, permissões, banda, matriz e deleção. O [RFC-HDAP](rfc-hdap.md) é normativo apenas para o **formato de fio e rotas** e não pode contradizer esta especificação. O [Modelo de Ameaça](modelo-de-ameaca.md) é normativo para os requisitos de segurança (`AME-*`). O [Léxico Grego](lexico-grego.md) é normativo para terminologia. Exemplos usam `VERSION: 1`, a versão do formato de documento, distinta da versão do protocolo.
 
@@ -63,13 +63,13 @@ O **HDAP** (Hsyst Descentralized Archive Protocol) é um protocolo para **guarda
 O termo **owner** aparece em vários contextos com sentidos **não intercambiáveis**:
 | Função | Termo técnico | Onde aparece | Imutável? |
 |---|---|---|---|
-| Autor do upload / signatário do conteúdo | `content_author` (implícito = `namespace_owner` hoje) | header `X-HDAP-Sphragis`, verificado contra sessão | sim (assinatura cobre bytes) |
+| Autor do upload / signatário do conteúdo | `origin_user` (autor da sessão autenticada) | header `X-HDAP-Sphragis`, verificado contra a sessão; `origin_user_pubkey` e `sphragis` no `prytaneion` | sim (assinatura cobre bytes) |
 | Dono do espaço lógico (namespace) | `namespace_owner` | query `owner` em `/ktema*`, `Blob.owner`, `BandObject.owner`, `adeia.hdap` | não (pode mudar via `metabibasis`) |
 | Uploader original (proveniência) | `origin_user` | `PrytaneionEntry.origin_user`, `PrytaneionDoc.origin_user` | **sim** |
 | Emissor da banda | `issuer` | `MochthosDoc.issuer`, `SyngrapheDoc.issuer` (node_id) | sim |
 | Transferidor / Recebedor | `cedente` / `cessionario` | `MetabibasisDoc.old_owner` / `new_owner` | sim (registro histórico) |
 
-**Regra:** documentação e código devem usar o termo técnico acima; o parâmetro de rota `owner` continua como `owner` por compatibilidade, mas **significa `namespace_owner`** (o espaço alvo). Quando a intenção for o autor do conteúdo, usar `origin_user` (do `prytaneion`) ou o `SIGNER` da `sphragis`.
+**Regra (v2):** documentação e código devem usar o termo técnico acima; o parâmetro de rota `owner` continua como `owner` por compatibilidade, mas **significa `namespace_owner`** (o espaço alvo). Quando a intenção for o autor do conteúdo, usar `origin_user` (do `prytaneion`) ou o `SIGNER` da `sphragis`. `origin_user` é imutável e independente do dono do namespace: uma metabíbase pode transferir o diretório sem reescrever a proveniência. `PrytaneionEntry.namespace_owner` tem `#[serde(default)]` para preservar registros escritos antes da separação.
 | `kairos` | Καιρός | Janela de tempo (TTL) |
 | `ktema` | Κτῆμα | Conteúdo/arquivo armazenado |
 
@@ -98,7 +98,7 @@ HDAP$/<user>/
 ```
 HDAP!<servidor>@<user>/<caminho>?hash=<64hex>
 ```
-- `hash` opcional; se presente, o nó verifica antes de servir. **Decidido: `?hash=<64hex>`** (FF provene hybrid querys).
+- `hash` opcional; se presente, o nó verifica antes de servir. Forma canônica: `?hash=<64hex>`.
 - `<servidor>` é o `server_id` do pyle; o default é `pyle-<base64url(host:port)>`, de modo que a URI carrega o endereço. Ao resolver uma URI cujo pyle é **outro**, o nó puxa/espelha o namespace do usuário sob demanda em vez de recusar (§14.2.1).
 
 ---
@@ -150,7 +150,8 @@ HDAP!<servidor>@<user>/<caminho>?hash=<64hex>
 - `krypte` (local, nunca trafega) e `symbolon` (derivado, §7) **não são DOC de rede**.
 
 ### 4.4 Versionamento e migração
-- **Duas versões distintas, não confundir:** a **versão do protocolo** é a geração descrita por este documento, hoje **1.0**; o **`FORMAT_VERSION` do documento `.hdap`** é a versão do formato textual, hoje **`1`**, cravada em todo `# VERSION:` e na constante `FORMAT_VERSION` do código (`hdap-core::doc`). Exemplos normativos usam `VERSION: 1`.
+- **Duas versões distintas, não confundir:** a **versão do protocolo** é a geração descrita por este documento, hoje **2.0 (Téleia vási / Teleios)**, anunciada por `GET /health` em `protocol_version: 2` e `protocol_codename: "Teleios"`; o **`FORMAT_VERSION` do documento `.hdap`** é a versão do formato textual, hoje **`1`**, cravada em todo `# VERSION:` e na constante `FORMAT_VERSION` do código (`hdap-core::doc`). Exemplos normativos usam `VERSION: 1`.
+- **Compatibilidade de geração (v2):** a Teleios **não** alterou o formato textual. Documentos `.hdap`, `prosopeion.hdap` e `adeia.hdap` escritos na v1 continuam válidos e são lidos sem conversão. O que mudou foi a derivação de chaves, o tempo, o repouso de segredos e as provas de autenticação; todas as formas legadas necessárias estão marcadas neste documento. O resumo normativo da geração está em [VERSAO.md](VERSAO.md).
 - **Regra de compatibilidade:** o parser **rejeita** `VERSION` desconhecido (fail-closed), então um bump de formato exige migrador explícito; nunca se reinterpreta silenciosamente um documento de versão futura.
 - **Migração de estado do nó:** campos novos de `State` no SQLite usam `#[serde(default)]`; se `node_sign_seed` estiver ausente num banco antigo, `Db::load` deriva uma seed não-nula do `master_key` (nunca `[0;32]`), preservando a verificação dos documentos já emitidos. Schema futuro desconhecido é **recusado**.
 
@@ -163,10 +164,13 @@ HDAP!<servidor>@<user>/<caminho>?hash=<64hex>
 | Assinatura `sphragis` | Ed25519 | par de assinatura |
 | Sigilo/envelope | X25519 + ChaCha20-Poly1305 | par de cifração |
 | Hash/MAC | SHA-256 / HMAC-SHA256 | — |
+| KDF de segredos compartilhados | HKDF-SHA256 | DH X25519, com rótulos distintos por papel |
 | KDF do cofre | Argon2id | senha do usuário |
 
 - Chaves privadas **nunca saem do cliente**; `prosopeion.hdap` só publica chaves públicas + `omphalos`.
 - AEAD nonce aleatório 12B por envelope; tag 16B; envelope com `VERSION`, `KDF`, `ITERATIONS`, `SALT`, `NONCE`, `TAG`, `CIPHERTEXT`.
+- **HKDF obrigatório (v2):** todo segredo compartilhado produzido por X25519 passa por `hkdf_sha256(ikm, salt, info)` antes de virar material de chave. Os rótulos normativos são `hdap:ecies` (envelope ECIES), `hdap:session` (segredo `K` do login) e `hdap:otp` (raiz da cadeia OTP). O mesmo DH NÃO pode ser reutilizado em dois papéis; os intermediários devem ser zeroizados.
+- **Envelope ECIES:** `eph_pub(32) ‖ nonce(12) ‖ ciphertext+tag`, com a chave ChaCha20-Poly1305 derivada com `hdap:ecies`. O formato antigo de `symbolon.hdap` não é usado pela v2 (§7).
 
 ### 5.1 Transporte (TLS)
 - **TLS de base no aplicativo**: todo nó gera **certificado auto-assinado Ed25519** no primeiro boot e o persiste no bundle atômico `<data>/tls.identity` (com export de `<data>/tls.crt` + `<data>/tls.key`); o pin é estável entre reinícios (um pin rotativo quebraria silenciosamente todo peer pinado, release de transferência e handshake de descoberta). `--ephemeral` mantém o comportamento antigo em memória para testes. Serve TLS via rustls; fora de loopback/dev, o cliente **não** aceita plaintext.
@@ -179,6 +183,9 @@ HDAP!<servidor>@<user>/<caminho>?hash=<64hex>
 
 ## 6. Cofre local (`krypte.hdap`)
 - DOC local cifrado (ChaCha20-Poly1305, chave = Argon2id(senha, salt)). Contém: seed/HDAP Identifier, chave privada de assinatura, chave privada de cifração, nickname/sufixo. **Nunca enviado à rede.**
+- **Formato v2:** cabeçalho `HDAPVAULT\0\x02`, seguido de `m_cost:u32le`, `t_cost:u32le`, `p_cost:u32le`, `salt(16)`, `nonce(12)` e `ciphertext+tag`. Os segredos embrulhados ocupam 96 bytes: `seed(32) ‖ sign_secret(32) ‖ enc_secret(32)`. O padrão é Argon2id 64 MiB / t=2 / p=1.
+- **Leitura v1:** um cofre com `HDAPVAULT\0\x01` continua legível com os parâmetros históricos 19 MiB / t=2 / p=1 e é regravado em v2 na próxima atualização. Nenhuma migração manual é exigida do usuário.
+- **Limites de sanidade:** o leitor v2 recusa `m_cost` fora de `[19*1024, 1024*1024]` KiB, `t_cost` fora de `[1,16]` ou `p_cost` fora de `[1,8]`, para que um cabeçalho adulterado não imponha consumo absurdo de memória ou tempo.
 
 ---
 
@@ -187,23 +194,32 @@ HDAP!<servidor>@<user>/<caminho>?hash=<64hex>
 O desenho do 3FA parte de três exigências que precisam valer ao mesmo tempo. A primeira é que o servidor consiga verificar a prova sem possuir um segredo que o cliente tem. A segunda é que a sessão seja verificável pelo nó que a emitiu, sem exigir que todos os nós compartilhem o mesmo segredo. A terceira é que o OTP não dependa de um estado global sincronizado a cada login. As decisões abaixo satisfazem essas três exigências.
 
 ### 7.1 Materiais
-- `session_secret`: **derivado, nunca transmitido.** Ambos os lados derivam `K = X25519(priv_enc(usuário), pub_enc(servidor)) == X25519(priv_enc(servidor), pub_enc(usuário))`. Nenhum servidor **armazena** `K`; cada nó recomputa `K` no momento da verificação a partir da **chave pública** do user (publicada em `prosopeion.hdap`) e da **chave privada** de seu próprio par de cifração.
-- `omphalos`: âncora da cadeia de hash (pública). Cada nó guarda apenas o **consumo de passos** que observou (ver 7.3).
+- `session_secret`: **derivado, nunca transmitido.** Ambos os lados derivam `DH = X25519(priv_enc(usuário), pub_enc(servidor)) == X25519(priv_enc(servidor), pub_enc(usuário))` e então `K = HKDF-SHA256(DH, salt=vazio, info="hdap:session")`. Nenhum servidor **armazena** `K`; cada nó recomputa `K` no momento da verificação a partir da **chave pública** do usuário (publicada em `prosopeion.hdap`) e da **chave privada** de seu próprio par de cifração. O material intermediário `DH` é zeroizado.
+- `omphalos`: âncora da cadeia de hash (pública). Na v2 a raiz é `HKDF-SHA256(seed, salt=vazio, info="hdap:otp")`; identidades v1 com âncora derivada da seed bruta continuam válidas (`Identity::otp_chain_for`). Cada nó guarda apenas o **consumo de passos** que observou (ver §7.3).
 
 ### 7.2 Fatores — fluxo por nó
-1. **F1 — posse (adesão):** `proklesis` (nonce+ts, TTL `kairos`=60 s), consumido; cliente assina com Ed25519; servidor valida com a chave pública do `prosopeion`.
-2. **F2 — conhecimento (OTP):** servidor pede passo `r`; cliente revela `w_r = H^(k-r)(seed)`; servidor verifica `H^r(w_r) == omphalos`. **A revelação é vinculada ao desafio**: cliente envia `w_r` **e** `H(w_r || proklesis.nonce)`; o servidor registra o passo consumido e **propaga o consumo aos pares** (federação, §7.4) — toda preimagem só vale no passo estritamente maior do que o maior passo observado.
-3. **F3 — posse de `K` (derivado por DH):** cliente envia `proof = HMAC(K, "hdap:code" || user_id || server_id || ts)`. Servidor computa `K` de `priv_enc(servidor) + pub_enc(user)` e verifica. **Sem envelope `auth_code` guardado pelo servidor, sem segredo armazenado, sem chance de o servidor não validar.**
+1. **F1 — posse (adesão):** `proklesis` (nonce+ts, TTL `kairos`=60 s), consumido; cliente assina `hdap:challenge:{nonce}:{ts}` com Ed25519 e **devolve exatamente o `ts` emitido pelo servidor**. O servidor valida com a chave pública do `prosopeion`. `client_ts_matches` exige **igualdade exata**: o relógio ou fuso do cliente não participa da decisão.
+2. **F2 — conhecimento (OTP):** servidor pede passo `r`; cliente revela `w_r = H^(k-r)(root)`; servidor verifica `H^r(w_r) == omphalos`. O servidor **nunca** aceita um `seed_iter` enviado pelo cliente para decidir quantos passos verificar: ele limita a checagem ao `otp_k` cadastrado e ao teto absoluto `MAX_OTP_CHAIN_LEN = 4096`. **A revelação é vinculada ao desafio**: cliente envia `w_r` **e** `H(w_r || proklesis.nonce)`; o servidor registra o passo consumido e **propaga o consumo aos pares** (federação, §14.2) — toda preimagem só vale no passo estritamente maior do que o maior passo observado.
+3. **F3 — posse de `K` vinculada ao desafio:** o texto canônico é `challenge_text = hdap:challenge:{nonce}:{ts}` e a prova v2 é `HMAC(K, "hdap:f3:v2:{user_id}:{server_id}:" || challenge_text)`, codificada em base64. Servidor reconstrói `challenge_text` a partir do desafio que emitiu e verifica. A forma legada `HMAC(K, "hdap:code:{user_id}:{server_id}:{ts}")` continua aceita **apenas** para contas v1, permitindo a migração sem recriar a identidade. **Sem envelope `auth_code` guardado pelo servidor, sem segredo armazenado, sem chance de o servidor não validar.**
 
-> **Por que a prova é válida:** o verificador tem tudo de que precisa. `K` deriva de material que ele já possui (a sua chave privada de cifração) somado à chave pública do usuário. Não existe a situação em que o servidor não tem o segredo.
+> **Por que a prova é válida:** o verificador tem tudo de que precisa. `K` deriva de material que ele já possui (a sua chave privada de cifração) somado à chave pública do usuário. Não existe a situação em que o servidor não tem o segredo. Na v2, o vínculo com `nonce` e `ts` impede que uma prova capturada de uma sessão seja reapresentada em outra, mesmo com o mesmo `user_id` e `server_id`.
 >
-> **Por que a sessão é por nó:** `symbolon = HMAC(K, "hdap:session" || server_id || exp)`. Outro nó não consegue verificar esse token, porque não tem `K`. A decisão é explícita: **a identidade é global; a sessão é por nó**. Um login cria sessões separadas por nó, reusando a mesma prova 3FA com desafio renovado. O token carrega `server_id` e nunca é aceito fora do emissor.
+> **Por que a sessão é por nó:** `symbolon = sha256_hex(HMAC(K, "hdap:session:{server_id}:{exp}"))`. Outro nó não consegue verificar esse token, porque não tem `K`. A decisão é explícita: **a identidade é global; a sessão é por nó**. Um login cria sessões separadas por nó, reusando a mesma prova 3FA com desafio renovado. O token carrega `server_id` e nunca é aceito fora do emissor. Ele é **determinístico** para `(K, server_id, exp)` — dois logins no mesmo segundo podem gerar o mesmo valor; não é um nonce aleatório.
 >
 > **Por que o OTP resiste a replay entre nós:** além do desafio de uso único, o consumo do passo (`w_r`) é propagado no `homospondoi` pela sincronização, no campo `OTP_CONSUMED` do `pheme` e do `prosopeion`. Um `w_r` já usado em outro nó tem `r` menor ou igual ao último passo observado e é rejeitado.
 
+### 7.2.1 Tempo UTC (normativo na v2)
+Todo instante do protocolo é `u64` com **segundos Unix desde `1970-01-01T00:00:00Z`**. Não há fuso, DST, offset ou string de data no fio; `CREATED_AT`, `EXPIRES_AT`, desafios, sessões e documentos usam a mesma base. `is_expired(now, exp)` trata `0` como "nunca expira" e considera inválido `now >= exp`.
+
+- **Autenticação:** o cliente devolve o `ts` emitido pelo servidor; igualdade exata, sem tolerância.
+- **Federação:** como ambos os lados geram seus próprios timestamps, `--time-tolerance` (padrão `300` s) permite `|ts_local − ts_recebido| <= tolerância` na verificação de assinaturas. A janela de anti-replay de nonces é independente (`fed_window_secs`, padrão `30` s).
+- **Observabilidade:** `GET /health` publica `time_utc` (inteiro) e `date_utc` (`YYYY-MM-DD HH:MM:SS UTC`); toda resposta HTTP carrega `X-HDAP-Server-Time: <unix_secs_utc>`.
+
 ### 7.3 Sessão (`symbolon`)
 - Token por nó, TTL configurável (default 12 h). Para acessar outro nó: re-autenticar com novo `proklesis` e OTP+1 (passo estritamente maior). O tipo `symbolon.hdap` na árvore **não existe mais** — o token é derivado localmente, não publicado.
-- **Rotação de `omphalos`** (`POST /omphalos`, sessão do dono): troca âncora e `SEED_ITER` (estritamente crescente) e zera o piso de replay do nó; a cadeia antiga morre. Para ser global, o usuário replica a nova edição do `prosopeion` pelos nós (cada nó roda a rotação por si).
+- **Em repouso (v2):** o nó grava apenas `v2:{sha256_hex("hdap:session-store:" + token)}`. O token bruto viaja no header `x-hdap-token`, nunca no banco. Linhas v1 em claro são convertidas no load (`Meta::into_state`) e o flush seguinte persiste só o hash. `is_session_storage_key` reconhece o prefixo `v2:`.
+- **Chave mestra (v2):** a chave dos blobs pode ficar em `--master-key-file` (64 hex = 32 bytes, modo `0600` em Unix). Com chave externa, a linha do DB é redacionada para `[0u8; 32]` e uma chave v1 existente é migrada na primeira inicialização. Sem backup da chave, os blobs ficam ilegíveis.
+- **Rotação de `omphalos` (`POST /omphalos`):** exige sessão e `identity_signature` Ed25519 da chave de identidade sobre `hdap:omphalos:v2:{user_id}:{old_anchor}:{new_anchor}:{new_k}`, além de `otp_anchor` (64 hex) e `seed_iter = k+1` estritamente crescente (≤4096). Um token roubado sozinho **não** pode rotacionar a âncora. O efeito é trocar âncora e `SEED_ITER` e zerar o piso de replay do nó; a cadeia antiga morre. Para ser global, o usuário replica a nova edição do `prosopeion` pelos nós (cada nó roda a rotação por si). Resposta: `{ "rotated": true, "seed_iter": n }`.
 
 ### 7.4 PoW de entrada (`pylaia`)
 - 1 mochthos "entry" por login (TTL configurável). Mesma solução vale para todos os nós (challenge single-use pertence ao nó).
@@ -245,7 +261,7 @@ BITS(claim) = clamp(ceil(log2(claim_hps × target_secs)), min_bits, max_bits)
 - Ao propagar `apographon`, metadados carregam o caminho dos `.hdap.mochthos` usados; nó destino confere (§10.3).
 
 ### 9.5 Estados
-`unused → dotado reservado → consumido (syngraphe)`; "liberada" só existe como liberação de disco local, não de capacidade (décision mantida).
+`unused → dotado reservado → consumido (syngraphe)`; "liberada" só existe como liberação de disco local, não de capacidade (decisão mantida).
 
 ---
 
@@ -254,7 +270,8 @@ BITS(claim) = clamp(ceil(log2(claim_hps × target_secs)), min_bits, max_bits)
 ### 10.1 Upload
 1. Cliente assina **bytes crus** com Ed25519 → envia `(ktema, hash, sphragis, referências adeia/prosopeion)`. A assinatura vai no header `X-HDAP-Sphragis` (base64).
 2. Servidor valida: hash==conteúdo, assinatura confere **contra a pubkey da sessão autenticada** (nunca contra campos do corpo), permissões de escrita, mochthos/choregia (syngraphe). Sem `X-HDAP-Sphragis` válido → `401` (salvo `require_content_signature=false`).
-3. Persiste **cifrado em repouso** (`aead_seal(master_key)`) e registra no `prytaneion` de **origem**. O commit é **síncrono antes da resposta**; falha → `500`.
+3. Persiste **cifrado em repouso** (`aead_seal(master_key)`) e registra no `prytaneion` de **origem**, com `origin_user` = usuário autenticado/autor, `origin_user_pubkey` e `sphragis` da assinatura recebida, e `namespace_owner` = dono do namespace alvo. O commit é **síncrono antes da resposta**; falha → `500`.
+4. **Contagem por delta (v2):** reenviar bytes idênticos ao blob existente é idempotente — não cobra banda nem aumenta `st.stored`/`moira`. A cota e a banda só são debitadas pelo delta real de armazenamento.
 
 ### 10.2 Matriz (`prytaneion.hdap`)
 - Por conteúdo (chave = hash): `ORIGIN_PYLE`, `ORIGIN_PROSPEION`, `REPLICAS [{pyle,path}]`, `LETHES` (histórico), `PHEME_UPDATES`.
@@ -346,7 +363,7 @@ O mecanismo é estrutural, não textual: `State::ceessions[cedente] = [{to, path
 | Método | Rota | Ação |
 |---|---|---|
 | POST | `/register` | 1º registro (prosopeion) |
-| POST | `/omphalos` | rotação da âncora OTP (sessão do dono; `SEED_ITER` estritamente crescente; piso de replay zerado) |
+| POST | `/omphalos` | rotação da âncora OTP: sessão, `otp_anchor` (64 hex), `seed_iter` crescente (≤4096) e `identity_signature` sobre o texto canônico v2 (§7.3); piso de replay zerado |
 | GET | `/proklesis` | desafio de auth (nonce) |
 | POST | `/auth` | prova 3FA → `symbolon` por nó (TTL) |
 | POST | `/mochthos/proklesis` | emitir desafio de mochthos (devolve `{challenge, issuer, target_secs, min_bits, max_bits}`) |
@@ -367,7 +384,9 @@ O mecanismo é estrutural, não textual: `State::ceessions[cedente] = [{to, path
 | GET/POST | `/prytaneion/*` | matriz, réplicas, leis |
 | GET | `/pheme` | reputação |
 | GET | `/kerux/{alias}` | DDNS |
-| GET | `/health`, `/pyle/integrity` | estado/integridade do nó |
+| GET | `/health` | estado do nó: `status`, `server_id`, `node_enc_pub`, `node_sign_pub`, `pylaia_required`, `pylaia_target`, `protocol_version` (2), `protocol_codename` (Teleios), `version`, `time_utc`, `date_utc`, `uptime_secs`, `users`, `files`, `motd` e `tls_pin` (quando TLS ativo) |
+| GET | `/motd` | Ángelma renderizada: `{motd, time_utc, server_id}` |
+| GET | `/pyle/integrity` | integridade do binário |
 | POST | `/timi` | (módulo `katallaxia`) publicar preço |
 | GET | `/timi` | (módulo `katallaxia`) listar preços anunciados |
 | POST | `/resolve` | resolver uma URI de acesso `HDAP!<pyle>@<user>/<path>` (puxa de outro pyle quando preciso — §14.2.1) |
@@ -387,7 +406,7 @@ O mecanismo é estrutural, não textual: `State::ceessions[cedente] = [{to, path
 | GET/POST | `/homospondoi/ledger` | livro global de réplicas/proveniência; `GET ?digest=` responde só o digest quando convergido, `GET ?hash=` filtra uma entrada, `POST` faz merge |
 | POST | `/homospondoi/house_move` | recebe transferência de casa assinada pelo usuário (nova edição de `adeia`) |
 
-Headers estilo HPS: `X-HDAP-*` + assinatura + nonce + timestamp ±30 s, nonce replay TTL.
+Headers estilo HPS: `X-HDAP-*` + assinatura + nonce + `X-HDAP-Timestamp`, com skew `<= --time-tolerance` (padrão `300` s) e retenção de nonces por `fed_window_secs` (padrão `30` s). Fora da federação, toda resposta leva `X-HDAP-Server-Time` para alinhamento de relógio; a validade de desafios e sessões **nunca** depende do relógio do cliente (§7.2.1).
 
 > **Federação aberta com pin no primeiro contato** (AME-34): `/homospondoi/handshake` admite qualquer pyle. Se `Config.federation_peers` (`node_id → {pubkey, endpoint, tls_pin}`) tiver uma entrada para o id, a chave apresentada precisa casar com ela; caso contrário, a chave apresentada é fixada em `State::peers` e o par passa a ser conhecido. Um id já fixado não aceita outra chave (`409`). `federation_peers` é, portanto, um reforço opcional de pin, não uma lista de admissão. O conteúdo continua verificado por assinatura de autor e hash, então um impostor pode ser alcançado, mas não pode forjar conteúdo.
 
@@ -438,7 +457,7 @@ Fluxo do espelhamento: `GET /homospondoi/namespace?owner=` no par → para cada 
 - **Limitação declarada**: em rede aberta, a janela de replay OTP = latência de sync; irredutível sem consenso global (ver §17 crítica/item 2).
 
 ### 14.3 Tokens/concorrência
-- Sessões com TTL; desafios consumidos; nonces de federação janela ±30 s + replay guard. Deleção: assinatura do solicitante + confirmação dos réplicas.
+- Sessões com TTL; desafios consumidos; nonces de federação com skew configurável (`--time-tolerance`, padrão 300 s) + janela de retenção de 30 s + replay guard. Deleção: assinatura do solicitante + confirmação dos réplicas.
 
 ---
 
@@ -448,9 +467,10 @@ Fluxo do espelhamento: `GET /homospondoi/namespace?owner=` no par → para cada 
 - Falha de nó em replicação: `pheme` + retry com backoff.
 - Falha de `lethe`: `prytaneion` evidencia → `oneidos` (+ `euthyne`/`paratheke` em modo aberto).
 - Upload interrompido: syngraphe não confirmado até persistência verificada integral.
-- HTTP próprio (std `TcpListener`), limites de body (100 MB), rate limiting (10 req/s burst 20 por IP) e depth de corpo.
+- HTTP próprio (std `TcpListener`), limites de body (`max_body_bytes`, padrão 64 MiB), cabeçalho (64 KiB), deadlines de leitura/escrita (20 s), rate limiting (10 req/s, burst 20, por `Request.peer`) e depth de corpo.
 - **Quota de armazenamento por usuário (`moira`)**: `Config::moira_bytes` (0 = ilimitado); upload que exceda → `413`; delete libera a quota. A banda (`choregia`) só é consumida no sucesso do upload — falha em qualquer validação devolve a banda intacta (reembolso implícito).
-- **Clock**: relógio do nó com `now()` capturado antes de locks (anti-deadlock); testes com relógio fixado para janelas determinísticas.
+- **Clock**: relógio do nó com `now()` capturado antes de locks (anti-deadlock); todo instante é Unix UTC (§7.2.1); testes com relógio fixado para janelas determinísticas.
+- **Exaustão e estado expirado (v2):** `--max-connections` (padrão `256`) limita conexões simultâneas e responde `503 {"error":"connection limit reached"}` acima do limite; `--cleanup-interval` (padrão `60` s) remove `proklesis` e sessões expirados, e `0` desativa o worker. Rate limiting usa o IP do socket (`Request.peer`), nunca um header escolhido pelo cliente. Locks envenenados são recuperados; um nó degradado responde `503`.
 
 ---
 
@@ -481,7 +501,7 @@ Fluxo do espelhamento: `GET /homospondoi/namespace?owner=` no par → para cada 
 | Incentivo | `katallaxia`: preço por byte-tempo, moeda sadia local, reputação e penhor. |
 | Consenso | Modo aberto = voto com stake (`paratheke`); Sybil não escala porque voz custa penhor. |
 | Deleção | `lethe` incentivado (fama e penhor), nunca enforcement físico; declarado. |
-| Autenticação | DH-derivada, sessão por nó, OTP com consumo propagado. |
+| Autenticação | DH derivado via HKDF, F3 vinculado ao desafio, sessão por nó gravada como hash, OTP limitado e com consumo propagado, rotação OMPHALOS assinada. |
 | Permissões | Só a identidade da sessão, nunca um hint. |
 | Privacidade | Metadados públicos são condição da verificabilidade; conteúdo cifrável no cliente; TLS. |
 | Complexidade | Núcleo mínimo (auth, ktema, mochthos, adeia, prytaneion, lethe); o resto é módulo. |
@@ -559,4 +579,4 @@ Regras de verificação (`ExousiaDoc::verify_chain`):
 ---
 
 ## 19. Referências
-- [lexico-grego.md](lexico-grego.md) (nomes), [filosofia-economica.md](filosofia-economica.md) (incentivos), [modelo-de-ameaca.md](modelo-de-ameaca.md) e [hps.md](hps.md) (legado).
+- [VERSAO.md](VERSAO.md) (resumo da geração v2), [lexico-grego.md](lexico-grego.md) (nomes), [filosofia-economica.md](filosofia-economica.md) (incentivos), [modelo-de-ameaca.md](modelo-de-ameaca.md) e [hps.md](hps.md) (legado).

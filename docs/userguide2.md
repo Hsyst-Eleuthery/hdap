@@ -1,6 +1,6 @@
 # Identidade e a Casa
 
-**HDAP v1.001 — Themelio · Epoptia**
+**HDAP v2.0 — Téleia vási · Teleios**
 
 **Escrito por Thaís (op3n/op3ny)**
 
@@ -51,7 +51,7 @@ Essa escolha de assinar os bytes crus, e não uma serialização intermediária,
 
 O cofre é a pasta que guarda a sua identidade. Por padrão, no Linux, ele fica em `~/.local/share/hdap/<nickname>/`; no Windows, em `%APPDATA%\hdap\<nickname>\`. A pasta final inclui o nickname, então duas identidades nunca compartilham o mesmo cofre por acidente, mesmo que você use a mesma máquina para várias pessoas.
 
-Dentro dela, você encontra três arquivos. O `krypte.hdap` é o cofre cifrado propriamente dito: contém as chaves privadas e a seed OTP, tudo protegido pela sua senha. O `prosopeion.hdap` é a identidade pública assinada: nickname, sufixo, chaves públicas e âncora OTP. E o `omphalos.step` é o contador local do OTP, usado no login para saber em que ponto da cadeia de hash você está. Os três são necessários para uma experiência tranquila, mas apenas o `krypte.hdap` e a senha são indispensáveis para recuperar a identidade; o contador pode ser reconstruído com a ajuda do servidor.
+Dentro dela, você encontra três arquivos. O `krypte.hdap` é o cofre cifrado propriamente dito: contém as chaves privadas e a seed OTP, tudo protegido pela sua senha. Desde a v2 ele tem cabeçalho `HDAPVAULT\0\x02` e registra os parâmetros Argon2 (padrão 64 MiB, duas passagens, um paralelismo) — cofres v1 continuam sendo abertos e são regravados no formato novo na próxima atualização. O `prosopeion.hdap` é a identidade pública assinada: nickname, sufixo, chaves públicas e âncora OTP. E o `omphalos.step` é o contador local do OTP, usado no login para saber em que ponto da cadeia de hash você está. Os três são necessários para uma experiência tranquila, mas apenas o `krypte.hdap` e a senha são indispensáveis para recuperar a identidade; o contador pode ser reconstruído com a ajuda do servidor.
 
 Você pode mudar a base do diretório com a variável de ambiente `HDAP_HOME`. O nickname continua sendo anexado, de modo que a variável muda o lugar onde os cofres ficam, mas não mistura cofres de pessoas diferentes. Esse detalhe é útil para testes, para manter identidades separadas e para colocar o cofre em um disco que você faz backup com mais frequência.
 
@@ -67,13 +67,17 @@ O **Ed25519** é o algoritmo de assinatura. Ele prova autoria e integridade. Ger
 
 O **X25519** é usado na etapa de transporte do login. Ele permite que o cliente demonstre conhecer um segredo derivado sem revelá-lo explicitamente. É uma camada adicional contra ataques de replay e contra a tentativa de se passar por você com uma assinatura capturada.
 
+O **HKDF-SHA256** é o passo que transforma o segredo compartilhado do X25519 em material de chave. Ele usa rótulos diferentes para cifrar mensagens (`hdap:ecies`), provar a sessão (`hdap:session`) e derivar a raiz da cadeia OTP (`hdap:otp`). Assim, o mesmo encontro de chaves não serve para dois papéis diferentes; os valores intermediários são apagados da memória.
+
 O **Argon2id** é a fechadura do cofre. Sua senha não é guardada em lugar nenhum; ela é transformada em uma chave por uma função lenta e resistente a hardware especializado. Isso significa que, mesmo que alguém copie o `krypte.hdap`, quebrar a senha exige um esforço enorme. Quanto mais longa e imprevisível for a senha, maior o custo para quem tentar.
 
 O **ChaCha20-Poly1305** é a cifra que protege o conteúdo. Ele não apenas cifra, mas autentica: se um byte for alterado, a decifragem falha. É como um lacre que denuncia qualquer violação. Ele é usado tanto no cofre local quanto nos blobs guardados pelo servidor.
 
 O **SHA-256** é a impressão digital. Produz o hash dos arquivos e dos documentos, e é o que dá endereço ao conteúdo. Se o arquivo mudar, o endereço muda. Se o endereço mudar sem que o conteúdo mude, alguma coisa está errada.
 
-Há ainda o **OTP em cadeia de hash**, que é o segundo fator do login. Ele funciona como uma lista de senhas de uso único que só avança: cada login revela o próximo elo, e o servidor recusa elos já usados. Assim, uma senha capturada não pode ser reutilizada, porque o próximo passo é sempre diferente.
+Há ainda o **OTP em cadeia de hash**, que é o segundo fator do login. Ele funciona como uma lista de senhas de uso único que só avança: cada login revela o próximo elo, e o servidor recusa elos já usados. A cadeia tem teto de 4096 passos e o servidor só verifica até o número de passos que você cadastrou — um cliente não pode pedir que ele calcule milhões de hashes. Assim, uma senha capturada não pode ser reutilizada, porque o próximo passo é sempre diferente.
+
+O **tempo do protocolo** é Unix UTC: um inteiro com segundos desde 1970-01-01 às 00:00 UTC. Não há fuso, horário de verão ou offset no fio. O servidor emite o instante do desafio, e o cliente o devolve exatamente como recebeu. O `health` do CLI e o rodapé da GUI mostram esse mesmo instante em UTC.
 
 ---
 
@@ -111,13 +115,33 @@ O terceiro são as **réplicas**, cópias em outros pyles autorizadas pela sua `
 
 ## Login: as três provas
 
-O login no HDAP se chama **3FA por nó** porque combina três fatores independentes, todos verificados pelo pyle. O primeiro é a assinatura de um desafio, que prova que o cliente possui a chave Ed25519. O segundo é um passo OTP, que revela o próximo elo de uma cadeia de hash e prova que o cliente está avançando a corrente, não repetindo uma mensagem antiga. O terceiro é uma prova de conhecimento da chave de transporte, um HMAC sobre o segredo derivado de X25519, que amarra a sessão ao canal.
+O login no HDAP se chama **3FA por nó** porque combina três fatores independentes, todos verificados pelo pyle. O primeiro é a assinatura de um desafio, que prova que o cliente possui a chave Ed25519: o texto assinado é `hdap:challenge:{nonce}:{ts}`. O segundo é um passo OTP, que revela o próximo elo de uma cadeia de hash e prova que o cliente está avançando a corrente, não repetindo uma mensagem antiga. O terceiro é uma prova de conhecimento da chave de transporte, um HMAC sobre o segredo derivado por X25519 e HKDF — e, desde a v2, ele também cobre o `nonce` e o `ts` do desafio. Gravar essa prova e tentar usá-la em outro login não funciona.
 
 O resultado é um **symbolon**: um token de sessão válido apenas naquele nó. A sessão não é global; a identidade é. Isso significa que você pode estar logado no pyle A e não no pyle B, e que um token vazado em um nó não serve para outro. É uma separação deliberada: cada operador é dono da sua sessão, mas nenhum é dono da sua identidade.
 
 O pyle é a autoridade sobre o passo OTP. Se o seu contador local ficar dessincronizado, por exemplo após restaurar um backup antigo, o cliente pergunta ao servidor qual é o próximo passo e se ajusta. O caminho inverso não existe: um passo já visto pelo servidor é recusado, porque aceitá-lo abriria a porta para replay. Essa assimetria é o que torna o OTP útil mesmo em um cliente que pode ser restaurado de um estado antigo.
 
+O relógio do seu computador também não entra nessa decisão. O cliente devolve exatamente o `ts` que o servidor emitiu no desafio; um relógio atrasado ou um fuso diferente não mudam o resultado. Quando dois pyles precisam comparar assinaturas entre si, aí sim existe uma tolerância configurável no servidor (`--time-tolerance`, padrão 5 minutos) — ela nunca é usada para validar a sua sessão.
+
 Existe um limite importante, e escondê-lo seria propaganda. Os três fatores vivem no mesmo cofre local. Isso protege contra o roubo de um fator isolado e contra replay, mas não protege contra um cofre comprometido. Se alguém tiver o cofre e a senha, terá os três fatores. A defesa, nesse caso, é a mesma de sempre: senha forte e backup seguro.
+
+---
+
+## Rotacionar a âncora OMPHALOS
+
+A âncora **OMPHALOS** é o ponto de partida público da sua cadeia OTP. A v2 permite trocá-la sem criar uma identidade nova, e exige mais do que o token da sessão: o comando precisa da sua chave de identidade para assinar a mudança. Na prática, um token roubado sozinho não consegue tomar sua conta.
+
+Na CLI:
+
+```bash
+HDAP_PASS='uma-senha-forte' hdap-cli --pass-env HDAP_PASS \
+  --home ~/.hdap --tls-pin "$PIN" rotate "$TOKEN"
+hdap-cli --pass-env HDAP_PASS --home ~/.hdap --tls-pin "$PIN" auth
+```
+
+Na GUI, o botão **🔑** faz a mesma coisa. O cliente envia a nova âncora, o número do próximo passo e uma assinatura Ed25519 sobre o texto canônico da rotação; o servidor confere os três, troca a âncora e zera o piso de replay daquele nó. O cofre local é regravado e o contador `omphalos.step` volta a `1`. Por isso o `auth` depois da rotação não é opcional: o token antigo pertence à cadeia anterior.
+
+A rotação é por pyle. Se você tem casa em mais de um nó, repita o procedimento em cada um e publique a nova edição do `prosopeion.hdap` para que a âncora nova seja reconhecida em toda a federação.
 
 ---
 
@@ -147,6 +171,10 @@ Vale repetir: o HDAP não tem "esqueci minha senha". Ele tem backup. A diferenç
 | **OTP** | Senha de uso único baseada em uma cadeia de hash. |
 | **TOFU** | "Trust On First Use": confiar no certificado na primeira conexão e fixá-lo depois. |
 | **pin** | A impressão digital do certificado TLS de um pyle. |
+| **HKDF** | Deriva chaves a partir do segredo compartilhado, com rótulos diferentes para cada uso. |
+| **OMPHALOS** | A âncora pública da cadeia OTP; pode ser rotacionada com assinatura da identidade. |
+| **UTC** | O relógio do protocolo: segundos desde 1970-01-01 às 00:00, sem fuso. |
+| **Ángelma** | A mensagem do nó com uptime, usuários, versão e protocolo. |
 
 ---
 
@@ -164,7 +192,13 @@ Vale repetir: o HDAP não tem "esqueci minha senha". Ele tem backup. A diferenç
 
 **Posso recuperar a identidade por e-mail?** Não existe esse mecanismo, e a ausência é intencional. Ninguém além de você pode redefinir sua identidade. Se você quer uma rede com recuperação central, o HDAP não é essa rede.
 
-**O que acontece se eu usar uma senha fraca?** O cofre fica mais fácil de quebrar se alguém obtiver o arquivo. A escolha da senha é sua; o protocolo não pode tornar forte uma senha fraca. Use uma senha longa e exclusiva.
+**O que acontece se eu usar uma senha fraca?** O cofre fica mais fácil de quebrar se alguém obtiver o arquivo. O Argon2id do formato v2 torna a tentativa cara, mas não transforma uma senha fraca em forte. Use uma senha longa e exclusiva.
+
+**Posso passar a senha na linha de comando?** Pode, mas não é recomendado: `--pass` aparece na lista de processos e o CLI avisa quando você o usa. Prefira `--pass-env HDAP_PASS`, `--pass-file <arquivo>` ou deixe o CLI pedir a senha no terminal com o eco desligado.
+
+**Meu relógio atrasado atrapalha o login?** Não. O servidor emite o instante do desafio e o cliente o devolve exatamente. O fuso da sua máquina nunca participa da decisão.
+
+**O que acontece se eu rotacionar a OMPHALOS?** A âncora antiga deixa de valer, o contador local volta a `1` e você precisa fazer `auth` de novo para ganhar um token da nova cadeia. Quem tiver apenas o token antigo não consegue mais agir como você.
 
 **Devo sincronizar o cofre em nuvem?** Só se você confiar no serviço e entender que está colocando o arquivo cifrado em um terceiro. O ideal é manter o cofre em um local que você controla e fazer backups offline.
 

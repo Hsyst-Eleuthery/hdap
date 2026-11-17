@@ -4,12 +4,12 @@
 
 oie, eu sou a **Thaís (op3n/op3ny)**. O HDAP nasceu de uma pergunta simples: como guardar arquivos de um jeito em que a posse, a autoria e a história não dependam da boa vontade de uma empresa? A resposta não foi criar mais uma nuvem — foi criar um protocolo pequeno o suficiente para ser entendido e forte o suficiente para ser verificado.
 
-Esta é a versão **v1.001**, o primeiro lançamento de correção do protocolo. O codinome de protocolo continua **Themelio** (matriz v1), que significa "Marco Zero", e o codinome de lançamento é **Epoptia**. A v1.0 foi o marco zero com o lançamento **Veritas Aeterna**; a v1.001 corrige a interface e a avaliação das permissões (`adeia`) sem romper documentos existentes.
+Esta é a versão **v2.0**, a geração **Téleia vási** do protocolo, com codinome **Teleios**. Ela sucede a v1.001 (**Themelio · Epoptia**) sem trocar o formato dos documentos: `# VERSION:` continua `1`. O que muda é a linguagem de interoperabilidade entre nós — tempo Unix UTC em todas as provas, derivação HKDF, sessões gravadas como hash, cofre versionado e autenticação ligada ao desafio emitido pelo servidor. A visão completa da geração está em [docs/VERSAO.md](docs/VERSAO.md).
 
 [![CI](https://github.com/Hsyst-Eleuthery/hdap/actions/workflows/ci.yml/badge.svg)](https://github.com/Hsyst-Eleuthery/hdap/actions/workflows/ci.yml)
 [![Licença: MIT](https://img.shields.io/badge/licen%C3%A7a-MIT-blue.svg)](LICENSE)
 
-**[Guia do Usuário](docs/userguide.md)** · **[Manual Técnico](docs/tecnico.md)** · **[Especificação](docs/especificacao-hdap.md)** · **[RFC](docs/rfc-hdap.md)** · **[Modelo de Ameaça](docs/modelo-de-ameaca.md)** · **[Downloads](https://github.com/Hsyst-Eleuthery/hdap/releases)**
+**[Guia do Usuário](docs/userguide.md)** · **[Visão v2](docs/VERSAO.md)** · **[Manual Técnico](docs/tecnico.md)** · **[Especificação](docs/especificacao-hdap.md)** · **[RFC](docs/rfc-hdap.md)** · **[Modelo de Ameaça](docs/modelo-de-ameaca.md)** · **[Downloads](https://github.com/Hsyst-Eleuthery/hdap/releases)**
 
 ---
 
@@ -41,7 +41,7 @@ A camada econômica existe e é funcional. A **banda** é gerada por prova de tr
 
 Na ponta, há três portas de entrada que falam o mesmo protocolo. O **hdap-gui** é o aplicativo de desktop, em português, inglês, espanhol e francês, com explorador de arquivos, editor de documentos, painel de configuração, busca por hash e resolução de alias na barra de endereço. O **hdap-cli** serve para automação e operação em servidores. E o **hdap-server** é o pyle, a peça que guarda conteúdo e participa da federação.
 
-A **v1.001 (Epoptia)** corrige a experiência de permissões. Negar um arquivo a uma pessoa agora funciona de verdade: a avaliação respeita caminho mais específico, sujeito `user:<id>` antes de `all` e `deny` antes de direitos positivos. A GUI passou a editar cada regra em três campos explícitos — **Quem**, **Onde** e **Pode** — e continua lendo as linhas compactas de v1.0.
+A **v2.0 (Teleios)** endurece o núcleo sem romper documentos. Todo tempo de protocolo é Unix UTC — o cliente nunca usa o próprio fuso para decidir validade. As chaves de sessão e a raiz da cadeia OTP passam por HKDF-SHA256, o passo OTP respeita o `otp_k` cadastrado (teto absoluto de 4096) e o terceiro fator assina o texto canônico do desafio emitido pelo servidor. Tokens de sessão são gravados apenas como `v2:{sha256(...)}`, e a chave mestra pode ficar fora do banco com `--master-key-file`. A autoria (`origin_user`) foi separada do dono do namespace (`namespace_owner`), e um upload idêntico ao existente não cobra banda. Handlers de rede não entram em pânico, limites de conexão e limpeza periódica são configuráveis, e `--time-tolerance` ajusta a tolerância de relógio apenas na federação. O MOTD — chamado **Ángelma** — aceita tags `HDAP{[tag]}`; CLI e GUI mostram Ángelma e UTC, e a rotação **OMPHALOS** passa a exigir assinatura da chave de identidade.
 
 ---
 
@@ -86,7 +86,7 @@ A confiança não é uma promessa: é uma sequência de provas que qualquer clie
 
 ### Baixar uma versão pronta
 
-Os pacotes de cada sistema ficam em **[Releases](https://github.com/Hsyst-Eleuthery/hdap/releases)**. A release **v1.001 (Epoptia)** é empacotada como `1.0.1`. Para Linux x86_64 com biblioteca estática, baixe `hdap-1.0.1-x86_64-unknown-linux-musl.tar.gz`, que é a opção mais portátil e não depende da glibc do sistema. Para Linux x86_64 com glibc, baixe `hdap-1.0.1-x86_64-unknown-linux-gnu.tar.gz`. Para Windows x86_64, baixe `hdap-1.0.1-x86_64-pc-windows-gnu.zip`. Cada pacote inclui `hdap-server`, `hdap-gui` e `hdap-cli` — com a extensão `.exe` no Windows — e um checksum SHA-256. Confira o checksum antes de executar qualquer binário.
+Os pacotes de cada sistema ficam em **[Releases](https://github.com/Hsyst-Eleuthery/hdap/releases)**. A release **v2.0 (Teleios)** é empacotada como `2.0.0`. Para Linux x86_64 com biblioteca estática, baixe `hdap-2.0.0-x86_64-unknown-linux-musl.tar.gz`, que é a opção mais portátil e não depende da glibc do sistema. Para Linux x86_64 com glibc, baixe `hdap-2.0.0-x86_64-unknown-linux-gnu.tar.gz`. Para Windows x86_64, baixe `hdap-2.0.0-x86_64-pc-windows-gnu.zip`. Cada pacote inclui `hdap-server`, `hdap-gui` e `hdap-cli` — com a extensão `.exe` no Windows — e um checksum SHA-256. Confira o checksum antes de executar qualquer binário.
 
 ### Compilar do código
 
@@ -124,14 +124,15 @@ Execute `./target/release/hdap-gui`. No primeiro uso, informe o host (`127.0.0.1
 
 ### Usar o CLI
 
-O CLI é a ferramenta de automação. O exemplo abaixo define uma função de conveniência, inicializa a identidade, registra no nó e obtém o token de sessão e o ID global:
+O CLI é a ferramenta de automação. Por segurança, ele não exige `--pass` na linha de comando: prefira `--pass-env`, `--pass-file` ou deixe que ele peça a passphrase no terminal, com eco desligado. O exemplo abaixo define uma função de conveniência, inicializa a identidade, registra no nó e obtém o token de sessão e o ID global:
 
 ```bash
 export PIN='cole-o-pin-impresso-pelo-servidor'
+export HDAP_PASS='uma-senha-forte'
 hdap() {
   ./target/release/hdap-cli \
     --host 127.0.0.1 --port 8443 --tls-pin "$PIN" \
-    --home ./minha-identidade --pass 'uma-senha-forte' "$@"
+    --home ./minha-identidade --pass-env HDAP_PASS "$@"
 }
 
 hdap init thais
@@ -150,6 +151,16 @@ hdap download "$TOKEN" "$ID" docs/nota.txt ./copia.txt
 ```
 
 O `OWNER` nos comandos de arquivo é o ID global (`$ID`), não apenas o nickname. O pin é obrigatório contra um nó TLS; sem `--tls-pin`, o CLI fala HTTP simples, o que só deve ser usado contra um nó iniciado com `--no-tls` em loopback. As opções globais podem vir antes ou depois do comando.
+
+O comando `health` não pede identidade nem passphrase e mostra `protocol=v2 (Teleios)`, `time_utc`/`date_utc`, uptime, contadores e a Ángelma do nó. A rotação da âncora OTP usa o token da sessão atual e a chave de identidade — um token roubado sozinho não pode tomar a conta:
+
+```bash
+hdap health
+hdap rotate "$TOKEN"
+hdap auth   # atualize TOKEN com a nova cadeia OTP
+```
+
+`--pass` ainda funciona, mas imprime um aviso: a senha fica visível na lista de processos.
 
 ---
 
@@ -182,12 +193,19 @@ Um nó de produção precisa de três coisas: TLS, persistência e uma política
   --data /var/lib/hdap \
   --moira 10737418240 \
   --max-upload 104857600 \
-  --rate-limit 60
+  --rate-limit 60 \
+  --motd "HDAP Ángelma · uptime HDAP{[uptime]}" \
+  --master-key-file /var/lib/hdap/master.key \
+  --max-connections 256 \
+  --cleanup-interval 60 \
+  --time-tolerance 300
 ```
 
 TLS é obrigatório fora de loopback: o nó se recusa a subir em claro em endereço não local. O diretório `--data` deve apontar para um disco persistente e com backup. A `--moira` limita o armazenamento por usuário, e `0` significa ilimitado. O `--max-upload` limita o tamanho de cada arquivo, e o `--rate-limit` reduz abuso de conexões. O `--advertise` é o endereço público que os pares usam para chegar até você e também define o id padrão do nó (`pyle-<base64(advertise)>`); sem ele, um bind em `0.0.0.0` geraria um id inalcançável. Um `--id` explícito vence o `--advertise`. A federação é sempre aberta: qualquer pyle pode se apresentar e passa a ser conhecido com a chave fixada no primeiro contato; entradas em `federation_peers` apenas reforçam o pin de um par já conhecido.
 
-O processo não precisa de root. Rode com um usuário dedicado, mantenha o diretório de dados fora de `/tmp` e faça backup de `tls.identity` junto com o banco, porque sem ele o pin do nó muda. Detalhes de operação, systemd, firewall e recuperação estão no **[Guia do Usuário](docs/userguide6.md)** e no **[Manual Técnico](docs/tecnico.md)**.
+`--motd` (ou `--motd-file`) define a Ángelma exibida em `/health`, `/motd`, no CLI e na GUI; as tags usam a forma `HDAP{[tag]}` (por exemplo `uptime`, `users`, `protocol`). `--master-key-file` guarda a chave mestra dos blobs em um arquivo hexadecimal de 32 bytes com modo `0600`, fora do banco — o DB fica com a linha zerada, e uma chave v1 existente é migrada na primeira inicialização. `--max-connections` limita conexões simultâneas e responde `503` acima do limite; `--cleanup-interval` remove desafios e sessões expirados (`0` desativa); `--time-tolerance` é a tolerância de relógio para assinaturas de federação, sem afetar a validade das sessões. Todas as respostas carregam `X-HDAP-Server-Time` com o segundo Unix UTC do nó.
+
+O processo não precisa de root. Rode com um usuário dedicado, mantenha o diretório de dados fora de `/tmp` e faça backup de `tls.identity` e da chave mestra junto com o banco, porque sem eles o pin do nó muda e os blobs ficam ilegíveis. Detalhes de operação, systemd, firewall e recuperação estão no **[Guia do Usuário](docs/userguide6.md)** e no **[Manual Técnico](docs/tecnico.md)**.
 
 ---
 
@@ -195,20 +213,20 @@ O processo não precisa de root. Rode com um usuário dedicado, mantenha o diret
 
 Estes são os nós públicos operados pelo projeto. Use-os para publicar, replicar ou simplesmente para alcançar a rede:
 
-| Endereço | Id do pyle |
+| Endereço | Id do pyle (derivado do endereço) |
 | --- | --- |
 | `pyle1.hdap.hsyst.org:8443` | `pyle-cHlsZTEuaGRhcC5oc3lzdC5vcmc6ODQ0Mw` |
 | `pyle2.hdap.hsyst.org:8444` | `pyle-cHlsZTIuaGRhcC5oc3lzdC5vcmc6ODQ0NA` |
 | `pyle3.hdap.hsyst.org:8445` | `pyle-cHlsZTMuaGRhcC5oc3lzdC5vcmc6ODQ0NQ` |
 | `pyle.thais.fyi:8443` | `pyle-cHlsZS50aGFpcy5meWk6ODQ0Mw` |
 
-Um nó que se anuncia nesses endereços deve subir com `--listen 0.0.0.0:<porta> --advertise <endereço>`, para que o id derivado seja o endereço público, e não o bind curinga. A confiança continua vindo da assinatura de conteúdo, do hash e da chave fixada no handshake — conhecer o endereço de um pyle não prova quem responde ali.
+Esses valores são **ids de pyle**, derivados do endereço anunciado — não são pins TLS. Um nó que se anuncia nesses endereços deve subir com `--listen 0.0.0.0:<porta> --advertise <endereço>`, para que o id derivado seja o endereço público, e não o bind curinga. Obtenha o pin de cada nó em `GET /health` (`tls_pin`) por um canal confiável e fixe-o no primeiro contato (`--tls-pin` na CLI); o pin TOFU é a proteção contra MITM, e conhecer o endereço de um pyle não prova quem responde ali.
 
 ---
 
 ## Qualidade e verificação
 
-O HDAP é construído com testes antes de promessas. A suíte tem **228 testes automatizados** cobrindo núcleo, servidor, CLI, TLS e GUI, além de um teste manual de integração com nó real. Há **testes adversariais** para replay, OTP, pin errado, CR isolado, request smuggling, permissão negada, réplica divergente e delete não autorizado. Há **fuzzing** dos parsers de documento e de requisição HTTP. O **modelo de ameaça** tem 41 entradas `AME-*`, cada uma ligada a uma mitigação e, quando aplicável, a um teste. E o CI exige formatação e lint (`cargo fmt --check`, `cargo clippy -D warnings`) antes de qualquer merge.
+O HDAP é construído com testes antes de promessas. A suíte tem **250 testes automatizados** cobrindo núcleo, servidor, CLI, TLS e GUI, além de um teste manual de integração com nó real. A geração v2 acrescenta testes para F3 vinculado ao desafio, limites do OTP, cofre v1/v2, sessões hashadas, chave mestra externa, rotação OMPHALOS assinada e exibição da Ángelma/UTC na GUI. Há **testes adversariais** para replay, OTP, pin errado, CR isolado, request smuggling, permissão negada, réplica divergente e delete não autorizado. Há **fuzzing** dos parsers de documento e de requisição HTTP. O **modelo de ameaça** tem 48 entradas `AME-*`, cada uma ligada a uma mitigação e, quando aplicável, a um teste. E o CI exige formatação e lint (`cargo fmt --check`, `cargo clippy -D warnings`) antes de qualquer merge.
 
 O objetivo não é dizer que o sistema é invulnerável — isso seria mentira. É garantir que cada garantia declarada tenha um mecanismo correspondente e um teste que tente quebrá-la.
 
@@ -216,7 +234,7 @@ O objetivo não é dizer que o sistema é invulnerável — isso seria mentira. 
 
 ## Limites honestos
 
-Nenhum sistema é soberano sem custo. Não existe recuperação central de senha: se você perder o `krypte.hdap` ou a senha, a identidade está perdida, e a única defesa é o backup. A criptografia em repouso protege o disco, não o operador: o nó precisa da chave mestra para servir os arquivos, e um operador com acesso total ao processo consegue lê-los. Os metadados são públicos por design, porque nomes, hashes e tamanhos fazem parte da verificação. A deleção é incentivo e reputação, não garantia física: um nó que já copiou o conteúdo pode tentar retê-lo, e o protocolo registra e penaliza, mas não teleporta para dentro do disco alheio. A federação é aberta por design: o primeiro contato fixa a chave do par, e o conteúdo continua protegido por assinatura e hash. E não há consenso global: o HDAP é federado, não uma blockchain, e a convergência é por documentos assinados e sincronização, não por votação global.
+Nenhum sistema é soberano sem custo. Não existe recuperação central de senha: se você perder o `krypte.hdap` ou a senha, a identidade está perdida, e a única defesa é o backup. A criptografia em repouso protege o disco, não o operador: o nó precisa da chave mestra para servir os arquivos, e um operador com acesso total ao processo consegue lê-los. Os metadados são públicos por design, porque nomes, hashes e tamanhos fazem parte da verificação. A deleção é incentivo e reputação, não garantia física: um nó que já copiou o conteúdo pode tentar retê-lo, e o protocolo registra e penaliza, mas não teleporta para dentro do disco alheio. A federação é aberta por design: o primeiro contato fixa a chave do par, e o conteúdo continua protegido por assinatura e hash. E não há consenso global: o HDAP é federado, não uma blockchain, e a convergência é por documentos assinados e sincronização, não por votação global. O token de sessão também é determinístico para `(chave compartilhada, servidor, expiração)` — dois logins no mesmo segundo podem produzir o mesmo valor; ele não é um nonce aleatório.
 
 Esses limites estão documentados em detalhe no **[Modelo de Ameaça](docs/modelo-de-ameaca.md)**.
 
@@ -224,15 +242,15 @@ Esses limites estão documentados em detalhe no **[Modelo de Ameaça](docs/model
 
 ## Versionamento e codinomes
 
-Todo lançamento do HDAP carrega dois codinomes. O **codinome de protocolo** dá nome a uma geração da linguagem do protocolo e muda apenas quando a forma como os nós conversam ou como os documentos são interpretados muda. O **codinome de lançamento** dá nome ao pacote como um todo e muda em qualquer release, inclusive nas correções que não tocam o protocolo. A versão 1.0 é o marco zero, com o protocolo **Themelio** e o lançamento **Veritas Aeterna**; a versão **v1.001** mantém o protocolo **Themelio** (matriz v1) e usa o lançamento **Epoptia**.
+Todo lançamento do HDAP carrega dois codinomes. O **codinome de protocolo** dá nome a uma geração da linguagem do protocolo e muda apenas quando a forma como os nós conversam ou como os documentos são interpretados muda. O **codinome de lançamento** dá nome ao pacote como um todo e muda em qualquer release, inclusive nas correções que não tocam o protocolo. A versão 1.0 é o marco zero, com o protocolo **Themelio** e o lançamento **Veritas Aeterna**; a v1.001 manteve **Themelio** e trouxe **Epoptia**. A v2.0 abre a geração **Téleia vási**, com protocolo **Teleios** — também o codinome de lançamento desta release.
 
-As regras valem para sempre. Correções, melhorias de interface, correções de bug, vulnerabilidades, documentação e empacotamento saem como `v1.001`, `v1.002`, `v1.003` e assim por diante, e apenas o codinome de lançamento muda. Mudanças de protocolo abrem uma versão nova, como `v2.0`, e nesse caso os dois codinomes mudam. Toda release atualiza a documentação, declara os dois codinomes e ajusta as datas de revisão. O histórico completo fica no **[CHANGELOG](CHANGELOG.md)**.
+As regras valem para sempre. Correções e melhorias dentro da geração v2 saem como `v2.001`, `v2.002` e assim por diante: apenas o codinome de lançamento muda, e o protocolo permanece **Teleios**. Mudanças na linguagem do protocolo abrem uma versão maior com os dois codinomes novos. O formato dos documentos é independente: `# VERSION: 1` continua valendo na v2. Toda release atualiza a documentação, declara os dois codinomes e ajusta as datas de revisão. O histórico completo fica no **[CHANGELOG](CHANGELOG.md)** e o resumo da geração em **[docs/VERSAO.md](docs/VERSAO.md)**.
 
 ---
 
 ## Documentação
 
-O **[Guia do Usuário](docs/userguide.md)** é a porta de entrada e explica o protocolo em linguagem simples, com capítulos sobre identidade, arquivos, economia, federação e operação. O **[Guia de Execução](docs/guia-de-execucao.md)** cobre compilação, testes, cross-build, empacotamento e o checklist de release. O **[Manual Técnico](docs/tecnico.md)** descreve a arquitetura e as decisões de engenharia, enquanto a **[Especificação Formal](docs/especificacao-hdap.md)** define a semântica normativa e o **[RFC-HDAP](docs/rfc-hdap.md)** descreve o formato de fio e as rotas. Para segurança, o **[Modelo de Ameaça](docs/modelo-de-ameaca.md)** lista ameaças, mitigações e o que não está coberto. O **[Léxico Grego](docs/lexico-grego.md)** reúne o vocabulário canônico e a **[Filosofia Econômica](docs/filosofia-economica.md)** explica a base do módulo de preço e reputação. Para o predecessor, o **[HPS](docs/hps.md)** conta a história e as lições que deram origem ao HDAP. O histórico de mudanças está no **[CHANGELOG](CHANGELOG.md)** e a política de reporte de vulnerabilidades no **[SECURITY](SECURITY.md)**.
+A [versão em inglês deste README](README.en.md) está disponível para quem prefere. O **[Guia do Usuário](docs/userguide.md)** é a porta de entrada e explica o protocolo em linguagem simples, com capítulos sobre identidade, arquivos, economia, federação e operação. A **[Visão da v2](docs/VERSAO.md)** resume o que mudou em relação à geração Themelio. O **[Guia de Execução](docs/guia-de-execucao.md)** cobre compilação, testes, cross-build, empacotamento e o checklist de release. O **[Manual Técnico](docs/tecnico.md)** descreve a arquitetura e as decisões de engenharia, enquanto a **[Especificação Formal](docs/especificacao-hdap.md)** define a semântica normativa e o **[RFC-HDAP](docs/rfc-hdap.md)** descreve o formato de fio e as rotas. Para segurança, o **[Modelo de Ameaça](docs/modelo-de-ameaca.md)** lista ameaças, mitigações e o que não está coberto. O **[Léxico Grego](docs/lexico-grego.md)** reúne o vocabulário canônico e a **[Filosofia Econômica](docs/filosofia-economica.md)** explica a base do módulo de preço e reputação. Para o predecessor, o **[HPS](docs/hps.md)** conta a história e as lições que deram origem ao HDAP. O histórico de mudanças está no **[CHANGELOG](CHANGELOG.md)** e a política de reporte de vulnerabilidades no **[SECURITY](SECURITY.md)**.
 
 ---
 

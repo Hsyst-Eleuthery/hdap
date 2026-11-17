@@ -1,6 +1,6 @@
 # Manual Técnico — HDAP
 
-**HDAP v1.001 — Themelio · Epoptia**
+**HDAP v2.0 — Téleia vási · Teleios**
 
 **Escrito por Thaís (op3n/op3ny)**
 
@@ -30,6 +30,8 @@ O HDAP é dividido em cinco crates Rust:
 | `hdap-cli` | Cliente de linha de comando e biblioteca de fluxo usada pela GUI. |
 | `hdap-gui` | Aplicativo desktop em `egui` para explorar arquivos, editar documentos e operar a casa. |
 
+A geração atual é a **v2 (Téleia vási · Teleios)**, anunciada por `/health` como `protocol_version: 2` e `protocol_codename: "Teleios"`. O formato dos documentos continua em `# VERSION: 1`; a versão do protocolo e a versão do formato são independentes. O resumo das mudanças está em [VERSAO.md](VERSAO.md).
+
 A regra de ouro é: **o núcleo não sabe que existe rede**. O servidor não reimplementa a validação de um documento; ele chama o núcleo. O CLI e a GUI também. Isso evita a pior forma de divergência em sistemas distribuídos: dois clientes concordarem sobre o formato e o servidor discordar dos dois.
 
 ```
@@ -53,7 +55,7 @@ Uma identidade no HDAP é um par de chaves:
 - uma **seed OTP** local, usada em cadeia de hash;
 - um `prosopeion.hdap` público, auto-assinado, que declara nickname, sufixo, chaves e âncora OTP.
 
-As chaves privadas nunca são enviadas ao servidor. Elas ficam no `krypte.hdap`, cifrado com Argon2id + ChaCha20-Poly1305. A senha do usuário não sai do computador.
+As chaves privadas nunca são enviadas ao servidor. Elas ficam no `krypte.hdap`, cifrado com Argon2id + ChaCha20-Poly1305. A senha do usuário não sai do computador. O formato v2 (`HDAPVAULT\0\x02`) registra os parâmetros Argon2 no cabeçalho (padrão 64 MiB/t=2/p=1) e valida limites de sanidade; cofres v1 (19 MiB/t=2/p=1) continuam legíveis e são regravados no formato novo na próxima atualização.
 
 O identificador global tem a forma `nickname_sufixo`, em que o sufixo é derivado da chave. Ele não é um cadastro central: é uma identidade que pode ser registrada em qualquer pyle sem deixar de ser a mesma.
 
@@ -61,13 +63,21 @@ O identificador global tem a forma `nickname_sufixo`, em que o sufixo é derivad
 
 O login é dividido em três fatores por nó:
 
-1. **Assinatura de desafio** — prova que o cliente tem a chave Ed25519.
-2. **Passo OTP** — revela o próximo elo de uma cadeia de hash; o nó recusa passos já usados.
-3. **Prova de conhecimento da chave de transporte** — um HMAC sobre o segredo derivado de X25519.
+1. **Assinatura de desafio** — prova que o cliente tem a chave Ed25519, sobre `hdap:challenge:{nonce}:{ts}`.
+2. **Passo OTP** — revela o próximo elo de uma cadeia de hash; o nó recusa passos já usados e limita a verificação ao `otp_k` cadastrado (teto absoluto 4096).
+3. **Prova de conhecimento da chave de transporte** — HMAC sobre `K`, derivado por X25519 e HKDF-SHA256, agora vinculado ao **texto canônico do desafio**: `hdap:f3:v2:{user}:{server}:{challenge_text}`. O cliente devolve exatamente o `ts` emitido pelo servidor, sem consultar seu próprio fuso.
 
 O resultado é um `symbolon`, token de sessão válido apenas naquele nó. A sessão não é global. O que é global é a identidade.
 
 O servidor é a autoridade sobre o passo OTP. Se o cliente perde o contador local, ele pergunta ao nó qual é o próximo passo — e o teste automatizado cobre esse caso. O contrário (cliente mandar um passo que o nó já viu) é rejeitado.
+
+### Derivação de chaves na v2
+
+Todo segredo compartilhado passa por HKDF-SHA256 com rótulos distintos antes de virar material de chave: `hdap:ecies` para o envelope, `hdap:session` para o segredo `K` do login e `hdap:otp` para a raiz da cadeia OTP. Os intermediários são zeroizados. Isso impede que o mesmo DH sirva a dois papéis diferentes.
+
+O token de sessão entregue ao cliente é determinístico para `(K, server_id, exp)`; em repouso o nó guarda apenas `v2:{sha256("hdap:session-store:" + token)}`. Bancos v1 são migrados no load. A chave mestra dos blobs pode ficar em `--master-key-file`, fora do SQLite, que passa a gravar a linha zerada.
+
+A rotação OMPHALOS passou a exigir a chave de identidade: `POST /omphalos` recebe `otp_anchor`, `seed_iter` crescente e `identity_signature` sobre `hdap:omphalos:v2:{user_id}:{old_anchor}:{new_anchor}:{new_k}`. Um token roubado sozinho não pode tomar a conta. CLI e GUI regravam o cofre e zeram o passo local após a rotação.
 
 ### Limite importante
 
@@ -299,18 +309,20 @@ Essa distinção é importante para não vender o projeto como algo que ele não
 
 | Camada | Mecanismo | O que protege |
 |---|---|---|
-| Identidade | Ed25519 + OTP + X25519 | autoria, replay, prova de posse |
+| Identidade | Ed25519 + OTP + X25519 + HKDF + F3 vinculado ao desafio | autoria, replay, prova de posse, desvinculação de sessões antigas |
 | Cofre local | Argon2id + ChaCha20-Poly1305 | chaves em repouso no cliente |
 | Transporte | TLS auto-assinado + pin | escuta e troca de nó no caminho |
 | Documento | canonicalização + assinatura sobre bytes | ambiguidade de representação |
 | Conteúdo | hash + assinatura + AEAD | alteração de bytes e disco roubado |
 | Autorização | `adeia` + sessão autenticada | acesso indevido |
 | Federação | handshake assinado + chave fixada no primeiro contato | nó reivindicando um id com outra chave |
-| Operação | persistência antes da resposta + limites de parser | perda de estado e smuggling |
+| Sessão em repouso | `v2:{sha256("hdap:session-store:" + token)}` + chave mestra externa | vazamento de backup virar sessão utilizável ou entregar a chave dos blobs |
+| Tempo | Unix UTC + `X-HDAP-Server-Time` + tolerância só na federação | decisões dependentes do fuso do cliente e skew entre pares |
+| Operação | persistência antes da resposta, limites de parser, teto de conexões e limpeza | perda de estado, smuggling, exaustão e estado expirado |
 
 O parser HTTP é escrito à mão e tem limites estritos: cabeçalho máximo, corpo máximo, sem `Transfer-Encoding: chunked`, `CR` isolado recusado e `Content-Length` conflitante recusado. Isso não é paranoia decorativa; é a diferença entre um servidor e uma superfície de ataque.
 
-O modelo completo, com 41 entradas e as mitigações correspondentes, está em [modelo-de-ameaca.md](modelo-de-ameaca.md).
+O modelo completo, com 48 entradas e as mitigações correspondentes, está em [modelo-de-ameaca.md](modelo-de-ameaca.md).
 
 ---
 
@@ -321,7 +333,10 @@ Um nó de produção precisa de:
 - **TLS** — o servidor recusa `--no-tls` fora de loopback;
 - **disco persistente** — `--data` não deve apontar para `/tmp`;
 - **backup** — banco + `tls.identity` + arquivos exportados;
-- **limites** — `--moira`, `--max-upload`, `--rate-limit`, `--band-per-hour`;
+- **limites** — `--moira`, `--max-upload`, `--rate-limit`, `--band-per-hour`, `--max-connections`, `--cleanup-interval`;
+- **chave mestra** — `--master-key-file` mantém a chave dos blobs fora do DB e exige backup do arquivo;
+- **Ángelma** — `--motd`/`--motd-file` com tags `HDAP{[tag]}`, servida em `/health`, `/motd`, CLI e GUI;
+- **tempo** — `--time-tolerance` ajusta o skew da federação; a validade da sessão continua exata;
 - **endereço anunciado** — `--advertise` define o endereço público e o id padrão do nó; é obrigatório na prática quando o bind é `0.0.0.0`;
 - **federação aberta** — o nó aceita o primeiro contato de qualquer pyle e fixa a chave apresentada; `federation_peers` é apenas um reforço opcional de pin;
 - **usuário dedicado** — o processo não precisa de root.
@@ -336,7 +351,7 @@ O servidor imprime o pin no stderr e o expõe em `/health`. Em produção, distr
 
 O projeto não pede confiança na maturidade. Ele mostra os testes:
 
-- **228 testes automatizados** (mais um teste manual de integração com nó real);
+- **250 testes automatizados** (mais um teste manual de integração com nó real);
 - testes de dois e três nós para federação, réplica, delete e sucessão;
 - testes de GUI que renderizam a interface em 960×640 e falham se um painel sair da tela;
 - testes de segurança para replay de OTP, pin incorreto, CR isolado, request smuggling e delete de peer não-originário;
@@ -356,6 +371,7 @@ O HDAP é federado, não uma blockchain. Não há consenso global, mineração d
 - metadados são públicos;
 - deleção é incentivada, não fisicamente garantida;
 - a federação é aberta por design; a primeira chave vista para um id é a que fica fixada;
+- o token de sessão é determinístico para `(K, server_id, exp)` — dois logins no mesmo segundo produzem o mesmo valor;
 - a economia (`katallaxia`) é opcional e não é necessária para arquivar.
 
 Esses limites não são falhas escondidas. São decisões de escopo documentadas para que ninguém compre uma promessa que o protocolo não faz.
@@ -364,7 +380,7 @@ Esses limites não são falhas escondidas. São decisões de escopo documentadas
 
 ## 18. Mapa da documentação
 
-Para usar o sistema, o [Guia do Usuário](userguide.md) e os seus [seis capítulos](userguide2.md) cobrem identidade, arquivos, economia, federação e operação. Para compilar e empacotar, o [Guia de Execução](guia-de-execucao.md). Para a semântica normativa, a [Especificação Formal](especificacao-hdap.md). Para o formato de fio e as rotas, o [RFC-HDAP](rfc-hdap.md). Para segurança, o [Modelo de Ameaça](modelo-de-ameaca.md). Para o vocabulário, o [Léxico Grego](lexico-grego.md). Para a base econômica do módulo opcional, a [Filosofia Econômica](filosofia-economica.md). E para a história do predecessor, o [HPS](hps.md).
+Para usar o sistema, o [Guia do Usuário](userguide.md) e os seus [seis capítulos](userguide2.md) cobrem identidade, arquivos, economia, federação e operação. A [Visão da v2](VERSAO.md) resume a geração Teleios e as diferenças em relação ao Themelio. Para compilar e empacotar, o [Guia de Execução](guia-de-execucao.md). Para a semântica normativa, a [Especificação Formal](especificacao-hdap.md). Para o formato de fio e as rotas, o [RFC-HDAP](rfc-hdap.md). Para segurança, o [Modelo de Ameaça](modelo-de-ameaca.md). Para o vocabulário, o [Léxico Grego](lexico-grego.md). Para a base econômica do módulo opcional, a [Filosofia Econômica](filosofia-economica.md). E para a história do predecessor, o [HPS](hps.md).
 
 ---
 

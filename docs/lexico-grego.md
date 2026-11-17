@@ -1,8 +1,8 @@
 # HDAP — Λεξικόν (Léxico Grego Canônico)
 
-**HDAP v1.001 — Themelio · Epoptia**
+**HDAP v2.0 — Téleia vási · Teleios**
 
-> Revisão de 2026-10-29 · Protocolo: **1.0** (matriz v1). O projeto se chama HDAP, mas todos os conceitos de protocolo, as superfícies de rede (tipos de documento, rotas REST, nomes de arquivo, chaves de configuração) e os identificadores de implementação carregam **nomes gregos transliterados**. Os glifos gregos são a forma canônica exibida na tabela; o código usa a transliteração ASCII em minúsculas, com `snake_case` para funções e variáveis e `CamelCase` para tipos.
+> Revisão de 2026-11-17 · Protocolo: **2.0** (Téleia vási / Teleios). O projeto se chama HDAP, mas todos os conceitos de protocolo, as superfícies de rede (tipos de documento, rotas REST, nomes de arquivo, chaves de configuração) e os identificadores de implementação carregam **nomes gregos transliterados**. Os glifos gregos são a forma canônica exibida na tabela; o código usa a transliteração ASCII em minúsculas, com `snake_case` para funções e variáveis e `CamelCase` para tipos.
 >
 > A regra do léxico é evitar nomes óbvios e clichês, como *agora*, *arete*, *ethos*, *logos*, *xenia*, *polis*, *nemesis* ou *phoenix*. Cada termo foi escolhido pela etimologia e serve à tese econômica do projeto: preço como sinal, reputação como capital e ordem espontânea.
 
@@ -51,6 +51,11 @@
 | Capacidade delegada | Ἐξουσία | `exousia` | a autoridade delegada; poder outorgado por assinatura em cadeia |
 | Sucessão / procuração de casa | Διάδοσις | `diadosi` | a transmissão/sucessão: fixa a casa e quem pode sucedê-la; também limita a propagação da cópia |
 | Dicionário de confiança | — | `pistis` | (reservado: TCD/PHEME avançado) |
+| Geração v2 do protocolo | Τελεία βάση | `Téleia vási` | "base consumada": a geração que completa a linguagem iniciada em Themelio; não é um termo de fio |
+| Codinome da geração v2 | Τέλειος | `Teleios` | "perfeito, completo, que chegou ao *télos*": codinome de protocolo e de lançamento da v2 |
+| Mensagem do nó (MOTD) | Ἄγγελμα | `angelma` / `Ángelma` | "o anúncio, a mensagem": a Ángelma servida em `/health` e `/motd`, com tags `HDAP{[tag]}` |
+| Rotação da âncora OTP | Περιστροφὴ Ὀμφαλοῦ | `omphalos rotation` | troca da âncora pública com assinatura de identidade; protocolo `hdap:omphalos:v2:...` |
+| Tempo do protocolo | — | `unix_secs_utc` | segundos Unix desde `1970-01-01T00:00:00Z`; sem fuso, DST ou offset no fio |
 
 ---
 
@@ -61,6 +66,7 @@
 3. **Código Rust** → transliteração ASCII: `pyle.rs`, `struct Symbolon`, `fn proklesis(...)`; exceções técnicas para termos que colidem com std (ex.: preço `timi`, nunca `time`).
 4. **Namespace raiz `HDAP$`** permanece com o nome do projeto; `HDAP!` permanece no esquema URI.
 5. **Ostentações:** o rótulo humano dos casos (ex.: o que era "TCD") passa a ser **Pheme**; a especificação nunca mais usa o nome antigo sem remissão `→ nome antigo`.
+6. **Codinomes não são termos de fio:** `Téleia vási`, `Teleios` e `Ángelma` nomeiam geração, protocolo e mensagem humana. Nas rotas e documentos continuam valendo `pyle`, `omphalos`, `symbolon` etc. O tempo é gravado como inteiro UTC, nunca como nome de fuso.
 
 ---
 
@@ -99,3 +105,20 @@
 | arbitration / accountability | `euthyne` |
 | canonical measure | `pechys` |
 | time window | `kairos` |
+| MOTD / message of the day | `angelma` (Ángelma) |
+| local clock / timezone | `unix_secs_utc` (UTC) |
+| seed rotation / rekeying | `omphalos rotation` |
+| protocol generation codename | `Téleia vási` / `Teleios` |
+
+---
+
+## 4. Codinomes das gerações
+
+| Geração | Codinome de protocolo | Codinome de lançamento | Formato de documento |
+|---|---|---|---|
+| v1.0 | Themelio ("Marco Zero") | Veritas Aeterna | `VERSION: 1` |
+| v1.001 | Themelio | Epoptia | `VERSION: 1` |
+| **v2.0** | **Teleios** (Téleia vási) | **Teleios** | **`VERSION: 1` (inalterado)** |
+
+O codinome de protocolo muda quando a linguagem de interoperabilidade muda; o de lançamento muda em qualquer release. Correções dentro da Teleios saem como `v2.001`, `v2.002` e assim por diante, com novo codinome de lançamento e o mesmo protocolo. A passagem de Themelio para Teleios alterou provas, tempo, cofre e repouso de segredos — mas **não** o formato textual dos documentos. O resumo completo está em [VERSAO.md](VERSAO.md).
+

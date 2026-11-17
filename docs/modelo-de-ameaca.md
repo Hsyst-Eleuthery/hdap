@@ -1,9 +1,10 @@
 # HDAP — Modelo de Ameaça
 
-**HDAP v1.001 — Themelio · Epoptia**
+**HDAP v2.0 — Téleia vási · Teleios**
 
-> Revisão de 2026-10-29 · Protocolo: **1.0** (matriz v1). Complementa a [Especificação Formal](especificacao-hdap.md). O vocabulário grego segue o [Léxico Grego](lexico-grego.md), em transliteração ASCII.
+> Revisão de 2026-11-17 · Protocolo: **2.0** (Téleia vási / Teleios). Complementa a [Especificação Formal](especificacao-hdap.md). O vocabulário grego segue o [Léxico Grego](lexico-grego.md), em transliteração ASCII.
 > Princípio: propriedades de segurança **concretas e verificáveis**; nada de "não pode ser hackeado".
+> Geração v2: **48 entradas `AME-*`** (inclui AME-43 a AME-49, específicas da Teleios).
 
 ---
 
@@ -31,21 +32,21 @@
 | AME-01 | Pyle serve `ktema` adulterado | integridade/autenticidade | Alto | hash + `sphragis`; cliente **sempre** verifica; `?hash=` na URI (§3.3, §10.5); `prytaneion` |
 | AME-02 | Pyle nega conteúdo (censura) | disponibilidade | Médio | `apographon` conhecidos no `prytaneion`; `pheme`; multi-nó URI (§10) |
 | AME-03 | Pyle retém conteúdo após `lethe` | privacidade/conformidade | Alto | deleção confirmada via `prytaneion`; `ostrakon`; `oneidos`/pheme; em modo aberto `euthyne`+`paratheke` (§10.4, §16) |
-| AME-04 | Replay de auth (pacote `authenticate` reusado) | sessão | Alto | `proklesis` consumida; HMAC com ts; janela `kairos`; passo OTP propagado (§7.2) |
+| AME-04 | Replay de auth (pacote `authenticate` reusado) | sessão | Alto | `proklesis` consumida; F3 vinculado a `nonce`+`ts` do desafio (AME-44); o cliente devolve exatamente o `ts` emitido; janela `kairos`; passo OTP propagado (§7.2) |
 | AME-05 | Força bruta do seed/`K` | autenticidade | Alto | seed 256-bit CSPRNG; `K` DH por sessão; rate limiting (§7, §15) |
 | AME-06 | Double-spend de mochthos | economia (banda) | Alto | `CHALLENGE` single-use por nó; `syngraphe` consome; recontagem local; sem reembolso (§9) |
 | AME-07 | SM fabrica mochthos para si | autenticidade da capacidade | Médio | mochthos **assinado pelo emitente** (dual-sig); revalidação pela política do destinatário (§9.2) |
 | AME-08 | Capacidade falsa (banda inflada) | disponibilidade/DoS lento | Médio | recontagem local; limite por user/nó; registro no `prytaneion` (§9.3) |
 | AME-09 | MITM de rede (sem pinning) | confidencialidade/autenticidade | Alto | TOFU/pinning obrigatório (§5, conventions) |
 | AME-10 | Pyle entrega estado/auth antigo | sessão | Médio | `symbolon` por nó com TTL; OTP passo estritamente maior que o observado (§7) |
-| AME-11 | Comprometimento de `krypte.hdap` (cofre local) | segredo (chaves) | Alto | ChaCha20-Poly1305 + Argon2id; senha forte; krypte nunca trafega (§6) |
+| AME-11 | Comprometimento de `krypte.hdap` (cofre local) | segredo (chaves) | Alto | ChaCha20-Poly1305 + Argon2id; cofre v2 com parâmetros no cabeçalho e limites de sanidade; senha forte; krypte nunca trafega (§6, AME-47) |
 | AME-12 | Engenharia social / phishing de seed | identidade completa | Alto | 3FA; fator OTP é só conhecimento; posse isolada não autentica (§7) |
 | AME-13 | Confusão de `nickname` (imitação de `nickname_...`) | identidade/reputação | Médio | sufixo CSPRNG 64 bits; verificação por `sphragis`, não nome (§3.1) |
 | AME-14 | Pyle mente sobre `prytaneion`/replicas | rastreabilidade | Médio | matriz assinada e com histórico; pheme reduz confiança do mentiroso (§10.2, §12) |
 | AME-15 | DoS por upload flood | disponibilidade | Médio | rate limit 10/s burst 20; quota; upload ≤100 MB (§15) |
 | AME-16 | Deploy com binário adulterado | todo o nó | Alto | `/pyle/integrity` responde hash; federação verifica versão (§14.1) |
 | AME-17 | Propagação de `pheme` falsa (score indevido) | reputação injusta | Médio | `pheme_candidate` assinado + evidência; modo aberto exige `paratheke` (§12) |
-| AME-18 | Nonce de federação reusado (replay inter-nó) | federação | Médio | nonce+timestamp ±30 s + replay TTL + nonce consumido (§14.2) |
+| AME-18 | Nonce de federação reusado (replay inter-nó) | federação | Médio | nonce + `X-HDAP-Timestamp` com skew `<= --time-tolerance` (padrão 300 s), retenção de nonces por 30 s e nonce consumido (§7.2.1, §14.2) |
 | AME-19 | Injeção/parsing de `stele` malformada | todo | Médio | parser estrito §4.2 rejeita; property tests com mutador estruturado: 20 000 variantes, oráculo = *o que é aceito tem que voltar byte-a-byte* (`parse_never_panics_and_anything_accepted_roundtrips`), mais casos-alvo por defeito |
 | AME-40 | **Request smuggling por CR isolado no head** — um `CR` fora de `CRLF` é terminador de linha para um proxy e dado comum para nós, logo os dois discordariam sobre onde terminam os headers (a dessincronização do CL, uma camada antes) | transporte | Alto | varredura pré-parse: todo `CR` precisa fazer parte de um `CRLF` (§14.2) |
 | AME-41 | **Request target fora de origin-form** — `http://host/x`, `host:port` ou `health` significam coisas diferentes para um proxy, e o roteamento só entende `/` | transporte | Médio | alvo precisa começar com `/`; só origin-form é aceito (§14.2) |
@@ -58,6 +59,13 @@
 | AME-37 | **Transporte HTTP serving em claro / Slowloris / resposta sem limite** — `--no-tls` aceito em bind público; headers sem teto; sem deadlines de leitura | transporte/disponibilidade | Alto | `--no-tls` recusado fora de loopback (`0.0.0.0`/`::` não são loopback); TLS obrigatório fora de loopback; `MAX_HEAD_BYTES` independente de `max_body`; `CONN_TIMEOUT` em leitura/escrita antes do handshake e da resposta; cliente de federação nunca envia em claro a peer remoto (TLS pinado com pin, TLS-TOFU no id endereçado sem pin; cleartext só em loopback); `MAX_RESPONSE_BYTES` + parada por `Content-Length` (§14.2) |
 | AME-35 | **Escrita perdida em silêncio** (persist best-effort) | persistência/integridade | Alto | `persist()` síncrono antes de responder; falha de flush → **HTTP 500**; carga inicial falha com exit code ≠ 0 (§14.1) |
 | AME-42 | **Backup usurpa a casa / pyle fora da diádosi copia ou lê** | disponibilidade/identidade | Alto | Promoção só com `diadosi.hdap` assinado pelo dono, hashes/edição atuais, fallback listado, peer do home com endpoint e health do primário falhando; sem documento, não promove. `DIADOSI=white/black` filtra replicação e leitura pelo `server_id`, inclusive réplicas antigas; só docs públicos de identidade escapam da leitura (§8, §14.2.1) |
+| AME-43 | **Validade decidida pelo relógio/fuso do cliente** — um cliente com hora errada poderia aceitar ou rejeitar desafios e sessões por conta própria | sessão/desafio | Alto | Todo instante é Unix UTC `u64`; o cliente devolve exatamente o `ts` emitido (`client_ts_matches`, igualdade exata); `X-HDAP-Server-Time` em toda resposta; `--time-tolerance` (padrão 300 s) vale **só** para assinaturas de federação (§7.2.1, §14.2) |
+| AME-44 | **Replay de F3 entre desafios** — uma prova HMAC capturada poderia ser reusada com outro `nonce` para o mesmo usuário e nó | sessão | Alto | Texto canônico v2 `hdap:f3:v2:{user}:{server}:hdap:challenge:{nonce}:{ts}`; o servidor reconstrói `challenge_text` do desafio que emitiu; a forma legada `hdap:code:...` fica restrita a contas v1 em migração (§7.2) |
+| AME-45 | **Cadeia OTP sem teto / `seed_iter` forjado pelo cliente** — um cliente poderia pedir milhões de hashes (DoS) ou pular passos declarando um índice alto | autenticação/disponibilidade | Médio | Raiz da cadeia por HKDF (`hdap:otp`); o servidor verifica no máximo `min(otp_k cadastrado, MAX_OTP_CHAIN_LEN = 4096)` e **nunca** usa um `seed_iter` do cliente como limite; identidades v1 com âncora raw continuam válidas (§7.1, §7.2) |
+| AME-46 | **Rotação de OMPHALOS com token roubado** — um bearer vazado trocaria a âncora e tomaria a conta | identidade | Alto | `POST /omphalos` exige sessão **e** `identity_signature` Ed25519 sobre `hdap:omphalos:v2:{user_id}:{old_anchor}:{new_anchor}:{new_k}`; `otp_anchor` com 64 hex; `seed_iter` estritamente crescente; piso de replay zerado só após validação (§7.3) |
+| AME-47 | **Sessão utilizável obtida de backup do nó / chave mestra no DB** — vazar o arquivo de estado entregaria tokens e blobs | sessão/confidencialidade | Alto | Token gravado apenas como `v2:{sha256("hdap:session-store:"+token)}`; linhas v1 em claro são hashadas no load; `--master-key-file` mantém a chave dos blobs fora do SQLite e redaciona a linha; cofre v2 com Argon2id parametrizado (§6, §7.3) |
+| AME-48 | **Exaustão de conexões e acúmulo de desafios/sessões expirados** | disponibilidade | Médio | `--max-connections` (padrão 256) com `503` imediato; `--cleanup-interval` (padrão 60 s) remove `proklesis`/sessões expirados (`0` desativa); deadlines de 20 s e tetos de head/body complementam AME-37 (§15) |
+| AME-49 | **Forjamento de identidade de peer via header** — um cliente poderia mentir seu IP para burlar o rate limit | rate limiting/federação | Médio | O limitador usa `Request.peer`, o IP do socket do kernel; headers como `x-hdap-peer` são ignorados para fins de limite (§15) |
 
 ---
 
@@ -65,8 +73,8 @@
 
 | ID | Ameaça | Mitigação | Verificação |
 |---|---|---|---|
-| AME-21 | **Fator 3 inválido** (servidor não tinha o segredo para validar o HMAC) | `K` **derivado por DH**: o servidor computa `K = X25519(priv_enc(S), pub_enc(U))` na verificação; **nada armazenado**; sem envelope `auth_code` em disco (§7.2-F3) | Unitário: o servidor verifica F3 sem possuir `K` em memória; `K` não aparece no arquivo de estado |
-| AME-22 | **Sessão global inválida** | Sessão **por nó**: `symbolon = HMAC(K,"hdap:session"‖server_id‖exp)`; outro nó não tem `K`. Decisão: identidade global, sessão por nó (§7.2) | Unitário: token rejeitado num segundo nó; teste inter-nó |
+| AME-21 | **Fator 3 inválido** (servidor não tinha o segredo para validar o HMAC) | `K = HKDF-SHA256(X25519(priv_enc(S), pub_enc(U)), hdap:session)` computado na verificação; **nada armazenado**; prova vinculada ao `challenge_text` (§7.2-F3) | Unitário: o servidor verifica F3 sem possuir `K` em memória; `K` não aparece no arquivo de estado |
+| AME-22 | **Sessão global inválida** | Sessão **por nó**: `symbolon = sha256_hex(HMAC(K,"hdap:session:{server_id}:{exp}"))`; outro nó não tem `K`. Decisão: identidade global, sessão por nó (§7.2) | Unitário: token rejeitado num segundo nó; teste inter-nó |
 | AME-23 | **Replay de OTP entre nós** | O passo `r` consumido é **propagado** (`OTP_CONSUMED` na sincronização); desafio de uso único; a revelação liga `w_r` ao `proklesis.nonce` (§7.2) | Integração 2S+1U: `w_r` usado no S1 é rejeitado no S2 |
 | AME-24 | **Permissões por hint replayável** | Autorização **só pela identidade da sessão**, nunca por hint; `shared=X25519` fica apenas para cifragem de conteúdo (§8) | Unitário: requisição com hint forjado = 403 |
 | AME-25 | **Sybil em rede aberta** | Dois modos: fechado = maioria simples; aberto = voto **pesado por `paratheke`** (voz = stake) (§12) | Teste de política de voto: anônimo não pesa no modo aberto |
@@ -89,7 +97,10 @@
 6. **Testes adversarial + vetores de canonicalização** — AME-19 e divergências cross-implementação.
 7. **Autorização só por sessão autenticada** (§8) — AME-24.
 8. **Nunca confiar em campo autodeclarado**: identidade por assinatura (AME-32), autor de upload por assinatura dos bytes (AME-33), membro de federação pela chave fixada no primeiro contato (AME-34), persistência confirmada antes da resposta (AME-35), raiz de cadeia de delegação pela chave do dono em disco (AME-36).
-9. **Transporte não é detalhe**: TLS é obrigatório fora de loopback, e todo input de rede é limitado por tempo **e** por tamanho antes de ser interpretado (AME-37).
+9. **Transporte não é detalhe**: TLS é obrigatório fora de loopback, e todo input de rede é limitado por tempo **e** por tamanho antes de ser interpretado (AME-37, AME-48).
+10. **HKDF com rótulos por papel e F3 vinculado ao desafio**: `hdap:ecies`, `hdap:session`, `hdap:otp`; a prova cobre `nonce` e `ts` emitidos pelo próprio nó (AME-44, AME-45).
+11. **Tempo Unix UTC, igualdade exata no cliente**: nenhuma decisão de validade depende de fuso ou relógio local; a tolerância existe apenas entre pares (AME-43).
+12. **Segredos em repouso não são credenciais**: token de sessão hashado, chave mestra fora do DB, cofre v2 com parâmetros auditáveis e limites de sanidade (AME-46, AME-47).
 
 ---
 
@@ -100,6 +111,9 @@
 - **Responsabilidade legal / jurisdição**: HDAP não arbitra lei; `euthyne` é arbitragem privada voluntária — AME-31.
 - **Sybil em rede aberta** depende de `paratheke` ter valor real; se o penhor for barato de obter, o voto volta a ser capturável — AME-25/27.
 - Física de autoridade para pinning: MITM de primeira conexão possível (aceito; bootstrap offline do primeiro nó).
+- **Token de sessão é determinístico** para `(K, server_id, exp)`: dois logins no mesmo segundo produzem o mesmo valor. A entropia vem do `K` derivado por X25519/HKDF, não de um nonce aleatório (AME-47).
+- **Formas legadas permanecem aceitas** para não abandonar quem já tem identidade: F3 `hdap:code:...` (AME-44), âncora OTP v1 de seed bruta (AME-45) e cofre v1 com Argon2 19 MiB (AME-11). A migração é progressiva: cofres v1 são regravados em v2 na próxima atualização, e sessões v1 são hashadas no load. Enquanto um cliente antigo usar as formas legadas, ele mantém as garantias antigas — mas não o vínculo ao desafio da v2.
+- **Cofre comprometido ainda é identidade comprometida**: os três fatores vivem no mesmo `krypte.hdap`; a rotação OMPHALOS exige a chave de identidade (AME-46), mas não recupera um cofre já copiado com senha conhecida.
 
 ---
 
@@ -147,5 +161,31 @@
 | Unit: peer remoto sem pin nunca faz probe em claro (vai a TLS-TOFU); cleartext só em loopback | AME-37 |
 | Unit: escalada de escopo e escape `docs/../secrets` → não contido | AME-36 |
 | Unit: capability expirada (`EXPIRES_AT`) rejeitada; `0` nunca expira | AME-36 |
+| Unit: `client_ts_matches` rejeita `ts` diferente do emitido; campo `time_utc` de `/health` é coerente com `X-HDAP-Server-Time` | AME-43 |
+| Unit: prova F3 gerada para o desafio A é rejeitada no desafio B (`nonce`/`ts` divergentes), com o mesmo usuário e nó | AME-44 |
+| Unit: `seed_iter` acima de `otp_k` ou de 4096 recusado; login com identidade v1 de âncora raw funciona | AME-45 |
+| Unit: `POST /omphalos` sem assinatura ou com assinatura errada → 401; assinada → 200 e piso de replay zerado | AME-46 |
+| Unit: arquivo de estado persistido não contém token em claro; chave de sessão começa com `v2:`; chave mestra externa não aparece no DB | AME-47 |
+| Unit: conexão acima de `--max-connections` → 503; worker de cleanup remove sessão/proklesis expirados | AME-48 |
+| Unit: header `x-hdap-peer` forjado não altera o peer usado pelo rate limit (`Request.peer`) | AME-49 |
+
+
+---
+
+## 7. O que a geração v2 acrescentou ao modelo
+
+A Teleios não substituiu ameaças antigas: tornou explícitas sete que antes eram pressupostas ou ficavam fora da tabela.
+
+| Entrada | Fato novo | Onde foi resolvido |
+|---|---|---|
+| AME-43 | Relógio/fuso local do cliente influenciando validade | `time.rs` (`client_ts_matches`, `is_expired`), `/health`, `X-HDAP-Server-Time` |
+| AME-44 | Prova F3 reutilizável em outro desafio | `prove_session_secret_bound` sobre `hdap:challenge:{nonce}:{ts}` |
+| AME-45 | Cadeia OTP ilimitada e `seed_iter` controlado pelo cliente | `MAX_OTP_CHAIN_LEN = 4096`, `otp_k` do registro, HKDF `hdap:otp` |
+| AME-46 | Token roubado rotacionando a âncora | `identity_signature` sobre `hdap:omphalos:v2:...` |
+| AME-47 | Backup do nó vazando tokens e chave mestra | `session_storage_key`, migração v1, `--master-key-file`, DB redacionado |
+| AME-48 | Exaustão de conexões e estado expirado | `--max-connections`, `--cleanup-interval`, deadlines e tetos |
+| AME-49 | IP forjado por header para burlar rate limit | `Request.peer` em vez de `x-hdap-peer` |
+
+O modelo continua com **48 entradas** e não promete ausência de vulnerabilidades: promete que cada ameaça declarada tem um mecanismo correspondente e, quando possível, um teste que tenta quebrá-lo.
 
 > Este modelo será atualizado à medida que a implementação encontre novos fatos.

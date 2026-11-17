@@ -1,6 +1,6 @@
 # Guia de Execução — Compilar, Testar e Empacotar o HDAP
 
-**HDAP v1.001 — Themelio · Epoptia**
+**HDAP v2.0 — Téleia vási · Teleios**
 
 **Escrito por Thaís (op3n/op3ny)**
 
@@ -16,6 +16,7 @@ Este guia é para quem vai **construir** o HDAP a partir do código: compilar, r
 - [Compilar do código](#compilar-do-código)
 - [Rodar os testes](#rodar-os-testes)
 - [Rodar um laboratório local](#rodar-um-laboratório-local)
+- [Operação v2: novas flags](#operação-v2-novas-flags)
 - [Estrutura do repositório](#estrutura-do-repositório)
 - [Compilação cruzada](#compilação-cruzada)
 - [Empacotar uma release](#empacotar-uma-release)
@@ -127,6 +128,52 @@ Para derrubar os processos no fim do teste, referencie-os pelo PID ou pelo nome 
 
 ---
 
+## Operação v2: novas flags
+
+A geração **Téleia vási · Teleios** acrescentou opções de operação e de segurança. O exemplo abaixo é a base de um nó de produção:
+
+```bash
+./target/release/hdap-server \
+  --listen 0.0.0.0:8443 \
+  --advertise arquivo.exemplo.com:8443 \
+  --data /var/lib/hdap \
+  --master-key-file /var/lib/hdap/master.key \
+  --motd-file /etc/hdap/angelma.txt \
+  --max-connections 256 \
+  --cleanup-interval 60 \
+  --time-tolerance 300 \
+  --moira 10737418240 \
+  --max-upload 104857600 \
+  --rate-limit 60
+```
+
+| Flag | Efeito | Default |
+|---|---|---|
+| `--master-key-file ARQUIVO` | chave mestra dos blobs fora do DB (64 hex = 32 bytes, `0600` em Unix); cria o arquivo e migra uma chave v1 quando presente | desligado (chave no DB, com aviso) |
+| `--motd TEXTO` / `--motd-file ARQUIVO` | Ángelma servida em `/health` e `/motd`, com tags `HDAP{[tag]}` | vazia |
+| `--max-connections N` | teto de conexões simultâneas; acima dele, `503` | `256` |
+| `--cleanup-interval N` | segundos entre limpezas de desafios/sessões expirados; `0` desativa | `60` |
+| `--time-tolerance N` | tolerância de skew para assinaturas de federação (não afeta sessões) | `300` |
+
+`--motd-file` e `--motd` apenas atribuem `cfg.motd`: quando ambos aparecem, **o último vence**. A chave mestra precisa entrar no backup junto com o banco e com `tls.identity`. Sem ela, os blobs cifrados ficam ilegíveis.
+
+No cliente, a passphrase não precisa mais ir no argv:
+
+```bash
+export HDAP_PASS='uma-senha-forte'
+
+hdap-cli --tls-pin "$PIN" health
+hdap-cli --pass-env HDAP_PASS --tls-pin "$PIN" whoami
+hdap-cli --pass-file /etc/hdap/pass --tls-pin "$PIN" rotate "$TOKEN"
+hdap-cli --pass-env HDAP_PASS --tls-pin "$PIN" auth
+```
+
+`health` não pede identidade nem passphrase e imprime `protocol=v2 (Teleios)`, `time_utc`, `date_utc`, uptime, contadores e a Ángelma. `rotate TOKEN` assina a nova âncora OMPHALOS com a chave de identidade, regrava o cofre e zera o passo local; depois dele, rode `auth` para obter um token da nova cadeia. `--pass` continua aceito, mas avisa que expõe a senha na lista de processos.
+
+Para verificar a geração, confira `protocol_version = 2` e `protocol_codename = "Teleios"` em `/health`. O detalhamento está em [VERSAO.md](VERSAO.md).
+
+---
+
 ## Estrutura do repositório
 
 ```
@@ -192,7 +239,7 @@ O alvo `x86_64-unknown-linux-gnu` usa o compilador nativo; os demais usam Zig. A
 
 ```bash
 cd target/release-assets
-sha256sum -c hdap-1.0.1-x86_64-unknown-linux-musl.tar.gz.sha256
+sha256sum -c hdap-2.0.0-x86_64-unknown-linux-musl.tar.gz.sha256
 ```
 
 ---
@@ -216,9 +263,9 @@ Antes de abrir um pull request, rode localmente os mesmos comandos da seção [R
 
 Toda release do HDAP segue a política de **dois codinomes** descrita no [guia do usuário](userguide.md#codenomes-e-versionamento) e no [CHANGELOG](../CHANGELOG.md). O procedimento:
 
-1. **Defina a versão.** Correções de interface, bugs e vulnerabilidades sobem um passo de patch (`v1.001`, `v1.002`, …) e mudam **apenas o codinome de lançamento**. Mudanças no protocolo abrem uma versão nova (`v2.0`) e mudam **os dois codinomes**.
+1. **Defina a versão.** Correções de interface, bugs e vulnerabilidades sobem um passo de patch (`v2.001`, `v2.002`, …) e mudam **apenas o codinome de lançamento**, mantendo o protocolo **Teleios**. Mudanças na linguagem do protocolo abrem a próxima versão maior e mudam **os dois codinomes**. O `FORMAT_VERSION` dos documentos só muda com um migrador explícito.
 2. **Atualize a versão** em `Cargo.toml` (workspace) e deixe o `Cargo.lock` acompanhar.
-3. **Atualize a documentação**: `README.md`, `CHANGELOG.md`, os documentos afetados em `docs/` e as datas de revisão.
+3. **Atualize a documentação**: `README.md`, `CHANGELOG.md`, `docs/VERSAO.md` quando a geração mudar, os documentos afetados em `docs/` e as datas de revisão.
 4. **Rode a verificação completa**: `fmt`, `clippy`, `cargo test --workspace` e `cargo audit`.
 5. **Gere os pacotes**: `scripts/cross-release.sh` para cada alvo suportado.
 6. **Confira os checksums** e anexe os arquivos à GitHub Release, nomeando-a com a versão e os dois codinomes.

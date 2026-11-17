@@ -1,6 +1,6 @@
 # Federação, Réplicas e Sucessão
 
-**HDAP v1.001 — Themelio · Epoptia**
+**HDAP v2.0 — Téleia vási · Teleios**
 
 **Escrito por Thaís (op3n/op3ny)**
 
