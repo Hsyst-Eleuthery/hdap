@@ -157,12 +157,14 @@ mod tests {
 
     #[test]
     fn renders_live_tags() {
-        let mut ctx = MotdContext::default();
-        ctx.server_id = "pyle1".into();
-        ctx.started_at = 1_700_000_000;
-        ctx.now = 1_700_000_124;
-        ctx.users = 42;
-        ctx.files = 7;
+        let ctx = MotdContext {
+            server_id: "pyle1".into(),
+            started_at: 1_700_000_000,
+            now: 1_700_000_124,
+            users: 42,
+            files: 7,
+            ..Default::default()
+        };
         let out = render(
             "HDAP{node} · up HDAP{[uptime]} · HDAP{[users]} users · HDAP{[files]} files · HDAP{[now_utc]}",
             &ctx,

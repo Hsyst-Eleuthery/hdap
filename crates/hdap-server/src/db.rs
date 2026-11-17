@@ -650,6 +650,7 @@ mod tests {
                 origin_server: "pyle-a".into(),
                 origin_user: "jose_0123456789abcdef".into(),
                 origin_user_pubkey: "aa".repeat(32),
+                namespace_owner: "jose_0123456789abcdef".into(),
                 origin_path: "docs/a.txt".into(),
                 sphragis: "sig".into(),
                 replicas: vec!["pyle-a:key".into()],
@@ -1036,8 +1037,10 @@ mod tests {
         let path = dir.join("node.db");
         let key = [0x5au8; 32];
 
-        let mut st = State::default();
-        st.master_key = key;
+        let st = State {
+            master_key: key,
+            ..Default::default()
+        };
         {
             let db = Db::open_with_master_key(&path, Some(key)).expect("open");
             db.flush(&st).expect("flush");

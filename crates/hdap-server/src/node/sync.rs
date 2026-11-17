@@ -153,6 +153,7 @@ impl SyncModule {
                     "content_hash": e.content_hash,
                     "origin_server": e.origin_server,
                     "origin_user": e.origin_user,
+                    "namespace_owner": e.namespace_owner,
                     "replicas": e.replicas,
                     "deletions": e.deletions,
                 })

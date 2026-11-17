@@ -67,6 +67,7 @@ impl MatrixModule {
                 origin_server: self.cfg.server_id.clone(),
                 origin_user: user_id.clone(),
                 origin_user_pubkey: pubkey,
+                namespace_owner: user_id.clone(),
                 origin_path: String::new(),
                 sphragis: String::new(),
                 replicas: vec![],

@@ -717,6 +717,7 @@ pub(crate) fn notify_deletion(
                 e.origin_user_pubkey.clone(),
                 e.origin_path.clone(),
                 e.sphragis.clone(),
+                e.namespace_owner.clone(),
             )
         })
     };
@@ -729,6 +730,7 @@ pub(crate) fn notify_deletion(
         "origin_user_pubkey": provenance.as_ref().map(|p| p.0.as_str()).unwrap_or(""),
         "origin_path": provenance.as_ref().map(|p| p.1.as_str()).unwrap_or(path),
         "sphragis": provenance.as_ref().map(|p| p.2.as_str()).unwrap_or(""),
+        "namespace_owner": provenance.as_ref().map(|p| p.3.as_str()).unwrap_or(owner),
     })
     .to_string();
     let mut notified = 0;

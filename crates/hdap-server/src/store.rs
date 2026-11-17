@@ -105,6 +105,10 @@ pub struct PrytaneionEntry {
     /// Base64 Ed25519 signature over the plaintext bytes, captured at upload.
     #[serde(default)]
     pub sphragis: String,
+    /// Namespace that physically holds the blob. v1 stored the namespace owner
+    /// in `origin_user`, losing the actual author when a delegate uploaded.
+    #[serde(default)]
+    pub namespace_owner: String,
     pub replicas: Vec<String>,
     pub deletions: Vec<String>,
     pub created_at: u64,

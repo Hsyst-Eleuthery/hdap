@@ -520,6 +520,7 @@ impl MirrorModule {
                 origin_server: origin_server.to_string(),
                 origin_user: origin_user.to_string(),
                 origin_user_pubkey: pubkey_hex.to_string(),
+                namespace_owner: requester.to_string(),
                 origin_path: origin_path.to_string(),
                 sphragis: sphragis.to_string(),
                 replicas: vec![replica.clone()],
@@ -533,6 +534,7 @@ impl MirrorModule {
             (&mut entry.origin_user_pubkey, pubkey_hex),
             (&mut entry.origin_path, origin_path),
             (&mut entry.sphragis, sphragis),
+            (&mut entry.namespace_owner, requester),
         ] {
             if slot.is_empty() && !value.is_empty() {
                 *slot = value.to_string();
@@ -843,6 +845,7 @@ impl MirrorModule {
                     content_hash: entry.hash.clone(),
                     origin_server,
                     origin_user,
+                    namespace_owner: remote.owner.clone(),
                     origin_user_pubkey: resp
                         .headers
                         .get("x-hdap-origin-pubkey")
@@ -887,6 +890,9 @@ impl MirrorModule {
                         .get("x-hdap-sphragis")
                         .cloned()
                         .unwrap_or_default();
+                }
+                if e.namespace_owner.is_empty() {
+                    e.namespace_owner = remote.owner.clone();
                 }
             }
             copied += 1;

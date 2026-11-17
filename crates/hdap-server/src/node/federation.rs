@@ -469,6 +469,7 @@ impl FederationModule {
                 origin_server: peer.node_id.clone(), // Track which peer announced this
                 origin_user: String::new(),
                 origin_user_pubkey: String::new(),
+                namespace_owner: String::new(),
                 origin_path: String::new(),
                 sphragis: String::new(),
                 replicas: vec![],
@@ -663,6 +664,7 @@ impl FederationModule {
                     content_hash: hash.to_string(),
                     origin_server: peer.node_id.clone(),
                     origin_user: owner.to_string(),
+                    namespace_owner: owner.to_string(),
                     origin_user_pubkey: body
                         .get("origin_user_pubkey")
                         .and_then(|v| v.as_str())
@@ -998,6 +1000,7 @@ mod tests {
                     origin_server: peer_id.into(),
                     origin_user: "jose_0123456789abcdef".into(),
                     origin_user_pubkey: "aa".repeat(32),
+                    namespace_owner: "jose_0123456789abcdef".into(),
                     origin_path: "blog/post.md".into(),
                     sphragis: "sig".into(),
                     replicas: vec![format!("{peer_id}:jose/blog/post.md")],
