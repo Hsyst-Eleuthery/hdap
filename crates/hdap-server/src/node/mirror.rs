@@ -93,7 +93,7 @@ impl MirrorModule {
         }
 
         let (local_known, local_home) = {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             match st.users.get(&owner) {
                 Some(u) => (true, u.home_pyle.clone()),
                 None => (false, String::new()),
@@ -139,7 +139,7 @@ impl MirrorModule {
         }
         add(&local_home);
         {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             if let Some(m) = st.mirrors.get(&owner) {
                 add(&m.origin_pyle);
             }
@@ -233,7 +233,7 @@ impl MirrorModule {
         // 1. Local first: an authorized copy under any namespace (including a
         // previous cache in the requester's own space).
         let local_matches: Vec<Blob> = {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             st.objects
                 .values()
                 .filter(|b| b.hash == hash)
@@ -265,15 +265,15 @@ impl MirrorModule {
 
         // 2. Find provenance. The local ledger is global, but a fresh bubble
         // may not have exchanged it yet; ask a bounded set of peers.
-        let mut entry = node.state.lock().unwrap().prytaneion.get(&hash).cloned();
+        let mut entry = node.lock_state().prytaneion.get(&hash).cloned();
         if entry.is_none() {
             let peers: Vec<_> = {
-                let st = node.state.lock().unwrap();
+                let st = node.lock_state();
                 st.peers.values().cloned().collect()
             };
             for peer in peers.iter().take(8) {
                 if let Some(found) = crate::node::ledger::find_on_peer(node, peer, &hash) {
-                    let mut st = node.state.lock().unwrap();
+                    let mut st = node.lock_state();
                     crate::node::ledger::merge(&mut st, &found);
                     entry = Some(found);
                     break;
@@ -287,7 +287,7 @@ impl MirrorModule {
             if !e.origin_server.is_empty() && e.origin_server != self.cfg.server_id {
                 sources.push(e.origin_server.clone());
             }
-            let known: Vec<String> = node.state.lock().unwrap().peers.keys().cloned().collect();
+            let known: Vec<String> = node.lock_state().peers.keys().cloned().collect();
             for replica in &e.replicas {
                 let server = replica_server(replica, &known);
                 if !server.is_empty() && server != self.cfg.server_id && !sources.contains(&server)
@@ -370,7 +370,7 @@ impl MirrorModule {
                 }
             }
             if pubkey_hex.is_empty() && !origin_user.is_empty() {
-                let st = node.state.lock().unwrap();
+                let st = node.lock_state();
                 pubkey_hex = st
                     .users
                     .get(&origin_user)
@@ -403,7 +403,7 @@ impl MirrorModule {
                 if !e.origin_server.is_empty() {
                     holders.push(e.origin_server.clone());
                 }
-                let known: Vec<String> = node.state.lock().unwrap().peers.keys().cloned().collect();
+                let known: Vec<String> = node.lock_state().peers.keys().cloned().collect();
                 for replica in &e.replicas {
                     let server = replica_server(replica, &known);
                     if !server.is_empty() && !holders.contains(&server) {
@@ -492,7 +492,7 @@ impl MirrorModule {
         let path = format!("cache/{hash}/{name}");
         let key = State::key(requester, &path);
         let now = node.now();
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         if let Some(existing) = st.objects.get(&key) {
             if existing.hash == hash {
                 return Ok(path);
@@ -549,7 +549,7 @@ impl MirrorModule {
         let Some(_user_id) = node.session_user(req) else {
             return Response::json(401, json_err("unauthorized"));
         };
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         let list: Vec<Value> = st
             .mirrors
             .iter()
@@ -574,7 +574,7 @@ impl MirrorModule {
         node: &crate::node::Node,
         pyle: &str,
     ) -> Result<crate::store::PeerRecord, Response> {
-        if let Some(peer) = node.state.lock().unwrap().peers.get(pyle).cloned() {
+        if let Some(peer) = node.lock_state().peers.get(pyle).cloned() {
             return Ok(peer);
         }
         let Some(endpoint) = crate::pyle::endpoint_from_id(pyle) else {
@@ -592,7 +592,7 @@ impl MirrorModule {
             "tls_pin": node.tls_pin,
             "directory_digest": crate::node::discovery::directory_digest(node),
             "ledger_digest": crate::node::ledger::digest(
-                &node.state.lock().unwrap().prytaneion
+                &node.lock_state().prytaneion
             ),
         })
         .to_string();
@@ -759,7 +759,7 @@ impl MirrorModule {
         for entry in &remote.entries {
             // Skip anything already present byte-for-byte (idempotent resolve).
             {
-                let st = node.state.lock().unwrap();
+                let st = node.lock_state();
                 if st
                     .objects
                     .get(&State::key(&remote.owner, &entry.path))
@@ -805,7 +805,7 @@ impl MirrorModule {
                 .get("x-hdap-origin-user")
                 .cloned()
                 .unwrap_or_else(|| remote.owner.clone());
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             let key = State::key(&remote.owner, &entry.path);
             // Never clobber existing local content with a replica.
             if st.objects.contains_key(&key) {
@@ -894,7 +894,7 @@ impl MirrorModule {
 
         // Register (or refresh) the mirror record and the owner's identity, so
         // authorization (`adeia`) and listing work exactly like local content.
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         let home_pyle = if remote.user.home_pyle.is_empty() {
             peer.node_id.clone()
         } else {
@@ -963,7 +963,7 @@ impl MirrorModule {
 
     /// The node identity used to sign outbound federation calls.
     fn outbound_identity(&self, node: &crate::node::Node) -> (String, ed25519_dalek::SigningKey) {
-        let seed = node.state.lock().unwrap().node_sign_seed;
+        let seed = node.lock_state().node_sign_seed;
         (
             self.cfg.server_id.clone(),
             ed25519_dalek::SigningKey::from_bytes(&seed),
@@ -1100,14 +1100,15 @@ mod tests {
                 query: BTreeMap::new(),
                 headers,
                 body: body.as_bytes().to_vec(),
+            peer: None,
             }
-        }
+}
 
         /// Populate `node` with a registered owner holding one blob, the way a
         /// real node would after register + upload.
         fn seed_owner(node: &Node, owner: &str, path: &str, plain: &[u8]) {
-            let master = node.state.lock().unwrap().master_key;
-            let mut st = node.state.lock().unwrap();
+            let master = node.lock_state().master_key;
+            let mut st = node.lock_state();
             st.users.insert(
                 owner.to_string(),
                 UserRecord {
@@ -1163,7 +1164,7 @@ mod tests {
                 federation_peers: BTreeMap::new(),
                 ..Config::default()
             });
-            node_b.state.lock().unwrap().node_sign_seed = seed_b;
+            node_b.lock_state().node_sign_seed = seed_b;
             seed_owner(&node_b, owner, "docs/a.txt", plain);
 
             let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1191,9 +1192,9 @@ mod tests {
                 federation_peers: peers,
                 ..Config::default()
             });
-            node_a.state.lock().unwrap().node_sign_seed = seed_a;
+            node_a.lock_state().node_sign_seed = seed_a;
             // pyle-b must trust pyle-a's outbound signature.
-            node_b.state.lock().unwrap().peers.insert(
+            node_b.lock_state().peers.insert(
                 "pyle-a".to_string(),
                 PeerRecord {
                     node_id: "pyle-a".to_string(),
@@ -1219,7 +1220,7 @@ mod tests {
 
             // A session on pyle-a (the user doing the browsing). It is the
             // owner themself, so the source lets us pull their whole space.
-            node_a.state.lock().unwrap().sessions.insert(
+            node_a.lock_state().sessions.insert(
                 "tok".to_string(),
                 Session {
                     user_id: owner.to_string(),
@@ -1249,7 +1250,7 @@ mod tests {
 
             // The blob now lives here, byte-identical and attributed to the owner.
             {
-                let st = node_a.state.lock().unwrap();
+                let st = node_a.lock_state();
                 let blob = st.objects.get(&State::key(owner, "docs/a.txt")).unwrap();
                 assert_eq!(blob.owner, owner);
                 assert_eq!(blob.hash, sha256_hex(plain));
@@ -1277,7 +1278,7 @@ mod tests {
                 server_id: "pyle-a".into(),
                 ..Config::default()
             });
-            node.state.lock().unwrap().sessions.insert(
+            node.lock_state().sessions.insert(
                 "tok".to_string(),
                 Session {
                     user_id: "local_ffffffffffffffff".to_string(),
@@ -1310,7 +1311,7 @@ mod tests {
                 server_id: "pyle-b".into(),
                 ..Config::default()
             });
-            node_b.state.lock().unwrap().node_sign_seed = seed_b;
+            node_b.lock_state().node_sign_seed = seed_b;
             seed_owner(&node_b, owner, "docs/upload.txt", plain);
             let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             let endpoint_b = listener.local_addr().unwrap().to_string();
@@ -1328,8 +1329,8 @@ mod tests {
                 server_id: "pyle-c".into(),
                 ..Config::default()
             });
-            node_c.state.lock().unwrap().node_sign_seed = seed_c;
-            node_b.state.lock().unwrap().peers.insert(
+            node_c.lock_state().node_sign_seed = seed_c;
+            node_b.lock_state().peers.insert(
                 "pyle-c".to_string(),
                 PeerRecord {
                     node_id: "pyle-c".to_string(),
@@ -1338,7 +1339,7 @@ mod tests {
                     tls_pin: None,
                 },
             );
-            node_c.state.lock().unwrap().peers.insert(
+            node_c.lock_state().peers.insert(
                 "pyle-b".to_string(),
                 PeerRecord {
                     node_id: "pyle-b".to_string(),
@@ -1348,7 +1349,7 @@ mod tests {
                 },
             );
             {
-                let mut st = node_c.state.lock().unwrap();
+                let mut st = node_c.lock_state();
                 st.users.insert(
                     owner.to_string(),
                     UserRecord {
@@ -1388,7 +1389,7 @@ mod tests {
             let v: Value = serde_json::from_slice(&resp.body).unwrap();
             assert_eq!(v["status"], "mirrored");
             assert_eq!(v["resolved_via"], "pyle-b");
-            let st = node_c.state.lock().unwrap();
+            let st = node_c.lock_state();
             let blob = st
                 .objects
                 .get(&State::key(owner, "docs/upload.txt"))
@@ -1411,7 +1412,7 @@ mod tests {
                 server_id: id_b.clone(),
                 ..Config::default()
             });
-            node_b.state.lock().unwrap().node_sign_seed = [7u8; 32];
+            node_b.lock_state().node_sign_seed = [7u8; 32];
             seed_owner(&node_b, owner, "docs/a.txt", plain);
             let node_b = std::sync::Arc::new(node_b);
             let served = std::sync::Arc::clone(&node_b);
@@ -1426,8 +1427,8 @@ mod tests {
                 server_id: id_a.clone(),
                 ..Config::default()
             });
-            node_a.state.lock().unwrap().node_sign_seed = [9u8; 32];
-            node_a.state.lock().unwrap().sessions.insert(
+            node_a.lock_state().node_sign_seed = [9u8; 32];
+            node_a.lock_state().sessions.insert(
                 "tok".to_string(),
                 Session {
                     user_id: owner.to_string(),
@@ -1449,7 +1450,7 @@ mod tests {
             // `pyle` is where the content is now served from: this node.
             assert_eq!(v["pyle"], id_a);
 
-            let st = node_a.state.lock().unwrap();
+            let st = node_a.lock_state();
             let blob = st.objects.get(&State::key(owner, "docs/a.txt")).unwrap();
             let back = hdap_core::crypto::aead_open(&st.master_key, &blob.bytes).unwrap();
             assert_eq!(back, plain);
@@ -1478,7 +1479,7 @@ mod tests {
                 server_id: id_b.clone(),
                 ..Config::default()
             });
-            node_b.state.lock().unwrap().node_sign_seed = [7u8; 32];
+            node_b.lock_state().node_sign_seed = [7u8; 32];
             seed_owner(&node_b, owner, "docs/a.txt", plain);
             let node_b = std::sync::Arc::new(node_b);
             let served = std::sync::Arc::clone(&node_b);
@@ -1492,8 +1493,8 @@ mod tests {
                 server_id: id_a,
                 ..Config::default()
             });
-            node_a.state.lock().unwrap().node_sign_seed = [9u8; 32];
-            node_a.state.lock().unwrap().sessions.insert(
+            node_a.lock_state().node_sign_seed = [9u8; 32];
+            node_a.lock_state().sessions.insert(
                 "tok".to_string(),
                 Session {
                     user_id: owner.to_string(),
@@ -1511,7 +1512,7 @@ mod tests {
                 String::from_utf8_lossy(&resp.body)
             );
 
-            let st = node_a.state.lock().unwrap();
+            let st = node_a.lock_state();
             let blob = st.objects.get(&State::key(owner, "docs/a.txt")).unwrap();
             let back = hdap_core::crypto::aead_open(&st.master_key, &blob.bytes).unwrap();
             assert_eq!(back, plain);
@@ -1520,10 +1521,10 @@ mod tests {
         /// Replace the owner's root `adeia.hdap` with one carrying `perms`, so
         /// the source advertises the ACL the mirror must obey.
         fn set_adeia(node: &Node, owner: &str, perms: &[hdap_core::protocol::Permission]) {
-            let master = node.state.lock().unwrap().master_key;
+            let master = node.lock_state().master_key;
             let text =
                 hdap_core::protocol::adeia_doc(owner, 1, None, 1_700_000_000, perms, None).render();
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             st.objects.insert(
                 State::key(owner, "adeia.hdap"),
                 Blob {
@@ -1550,8 +1551,9 @@ mod tests {
                 query,
                 headers,
                 body: Vec::new(),
+            peer: None,
             }
-        }
+}
 
         fn delete_ktema(owner: &str, path: &str, token: &str) -> Request {
             let mut req = get_ktema(owner, path, token);
@@ -1580,7 +1582,7 @@ mod tests {
                 server_id: id_b.clone(),
                 ..Config::default()
             });
-            node_b.state.lock().unwrap().node_sign_seed = [7u8; 32];
+            node_b.lock_state().node_sign_seed = [7u8; 32];
             seed_owner(&node_b, owner, "docs/a.txt", plain);
             set_adeia(
                 &node_b,
@@ -1602,9 +1604,9 @@ mod tests {
                 server_id: id_a,
                 ..Config::default()
             });
-            node_a.state.lock().unwrap().node_sign_seed = [9u8; 32];
+            node_a.lock_state().node_sign_seed = [9u8; 32];
             {
-                let mut st = node_a.state.lock().unwrap();
+                let mut st = node_a.lock_state();
                 st.sessions.insert(
                     "tokg".to_string(),
                     Session {
@@ -1667,7 +1669,7 @@ mod tests {
                 server_id: id_b.clone(),
                 ..Config::default()
             });
-            node_b.state.lock().unwrap().node_sign_seed = [7u8; 32];
+            node_b.lock_state().node_sign_seed = [7u8; 32];
             seed_owner(&node_b, owner, "docs/f.png", plain);
             // Enforce `all read` in the cache while leaving the `adeia.hdap`
             // blob at the empty default created at registration.
@@ -1701,8 +1703,8 @@ mod tests {
                 server_id: id_a,
                 ..Config::default()
             });
-            node_a.state.lock().unwrap().node_sign_seed = [9u8; 32];
-            node_a.state.lock().unwrap().sessions.insert(
+            node_a.lock_state().node_sign_seed = [9u8; 32];
+            node_a.lock_state().sessions.insert(
                 "tok".to_string(),
                 Session {
                     user_id: guest.to_string(),
@@ -1753,7 +1755,7 @@ mod tests {
                 ..Config::default()
             });
             {
-                let mut st = node_b.state.lock().unwrap();
+                let mut st = node_b.lock_state();
                 st.node_sign_seed = [7u8; 32];
                 st.sessions.insert(
                     "tok_o".to_string(),
@@ -1787,8 +1789,8 @@ mod tests {
                 server_id: id_a,
                 ..Config::default()
             });
-            node_a.state.lock().unwrap().node_sign_seed = [9u8; 32];
-            node_a.state.lock().unwrap().sessions.insert(
+            node_a.lock_state().node_sign_seed = [9u8; 32];
+            node_a.lock_state().sessions.insert(
                 "tokg".to_string(),
                 Session {
                     user_id: guest.to_string(),
@@ -1868,7 +1870,7 @@ mod tests {
                 server_id: id_b.clone(),
                 ..Config::default()
             });
-            node_b.state.lock().unwrap().node_sign_seed = [7u8; 32];
+            node_b.lock_state().node_sign_seed = [7u8; 32];
             seed_owner(&node_b, owner, "docs/a.txt", plain);
             let node_b = std::sync::Arc::new(node_b);
             let served = std::sync::Arc::clone(&node_b);
@@ -1882,8 +1884,8 @@ mod tests {
                 server_id: id_a,
                 ..Config::default()
             });
-            node_a.state.lock().unwrap().node_sign_seed = [9u8; 32];
-            node_a.state.lock().unwrap().sessions.insert(
+            node_a.lock_state().node_sign_seed = [9u8; 32];
+            node_a.lock_state().sessions.insert(
                 "tokg".to_string(),
                 Session {
                     user_id: guest.to_string(),
@@ -1957,10 +1959,10 @@ mod tests {
                 server_id: id_b.clone(),
                 ..Config::default()
             });
-            node_b.state.lock().unwrap().node_sign_seed = [7u8; 32];
+            node_b.lock_state().node_sign_seed = [7u8; 32];
             seed_owner(&node_b, owner, path, plain);
             // The source must trust the requester's outbound federation signature.
-            node_b.state.lock().unwrap().peers.insert(
+            node_b.lock_state().peers.insert(
                 "pyle-a".to_string(),
                 PeerRecord {
                     node_id: "pyle-a".to_string(),
@@ -1989,8 +1991,8 @@ mod tests {
                 server_id: "pyle-a".into(),
                 ..Config::default()
             });
-            node_a.state.lock().unwrap().node_sign_seed = [9u8; 32];
-            node_a.state.lock().unwrap().peers.insert(
+            node_a.lock_state().node_sign_seed = [9u8; 32];
+            node_a.lock_state().peers.insert(
                 peer_id.to_string(),
                 PeerRecord {
                     node_id: peer_id.to_string(),
@@ -1999,7 +2001,7 @@ mod tests {
                     tls_pin,
                 },
             );
-            node_a.state.lock().unwrap().sessions.insert(
+            node_a.lock_state().sessions.insert(
                 "tok".to_string(),
                 Session {
                     user_id: owner.to_string(),
@@ -2022,7 +2024,7 @@ mod tests {
                 serde_json::json!({ "uri": format!("HDAP!{id_b}@{owner}/docs/a.txt") }).to_string();
             let r = node_a.handle(&req("POST", "/resolve", Some("tok"), &resolve));
             assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(&r.body));
-            let st = node_a.state.lock().unwrap();
+            let st = node_a.lock_state();
             let blob = st.objects.get(&State::key(owner, "docs/a.txt")).unwrap();
             let back = hdap_core::crypto::aead_open(&st.master_key, &blob.bytes).unwrap();
             assert_eq!(back, plain);

@@ -2,11 +2,12 @@
 //! (especificacao-hdap.md §7).
 
 use crate::crypto::{
-    ed25519_sign, hmac_sha256, otp_chain, otp_reveal, otp_verify, sha256_hex, x25519_shared,
-    CryptoError, CryptoResult,
+    ed25519_sign, hkdf_sha256, hmac_sha256, otp_chain, otp_reveal, otp_verify_bounded, sha256_hex,
+    x25519_shared, CryptoError, CryptoResult, KDF_INFO_OTP, KDF_INFO_SESSION, MAX_OTP_CHAIN_LEN,
 };
 use ed25519_dalek::{Signature, SigningKey};
 use x25519_dalek::StaticSecret;
+use zeroize::Zeroize;
 
 /// Challenge issued by a server for factor 1 (possession). Nonce + timestamp,
 /// one-time use.
@@ -66,10 +67,13 @@ pub fn verify_possession(
         .map_err(|_| CryptoError::VerificationFailed)
 }
 
-/// Generate an OTP chain of `k` steps from the identity seed. Returns
-/// `(anchor_hex, chain)` where `chain[k]` is the anchor.
+/// Generate an OTP chain of `k` steps from the identity seed. The seed is
+/// first passed through HKDF-SHA256 with the OTP domain label so the chain
+/// root is never a raw identity/secret byte string.
 pub fn make_otp_chain(seed: &[u8; 32], k: usize) -> (String, Vec<[u8; 32]>) {
-    otp_chain(seed, k)
+    assert!(k > 0 && k <= MAX_OTP_CHAIN_LEN, "invalid OTP chain length");
+    let root = hkdf_sha256(seed, &[], KDF_INFO_OTP);
+    otp_chain(&root, k)
 }
 
 /// Reveal the preimage at step `r` (factor 2).
@@ -80,9 +84,16 @@ pub fn prove_knowledge(chain: &[[u8; 32]], r: usize) -> Option<OtpWitness> {
     })
 }
 
-/// Verify factor 2 against the public anchor.
+/// Verify factor 2 against the public anchor, bounded by the chain length
+/// registered for that user. Pass `max_steps = chain length (otp_k)`, never a
+/// value supplied by the remote peer.
+pub fn verify_knowledge_bounded(anchor_hex: &str, witness: &OtpWitness, max_steps: usize) -> bool {
+    otp_verify_bounded(anchor_hex, witness.step, &witness.proof, max_steps)
+}
+
+/// Verify factor 2 with the global ceiling only. Prefer the bounded variant.
 pub fn verify_knowledge(anchor_hex: &str, witness: &OtpWitness) -> bool {
-    otp_verify(anchor_hex, witness.step, &witness.proof)
+    verify_knowledge_bounded(anchor_hex, witness, MAX_OTP_CHAIN_LEN)
 }
 
 /// Factor 3: HMAC proof that this peer knows the shared session key `k`.
@@ -94,6 +105,24 @@ pub fn verify_knowledge(anchor_hex: &str, witness: &OtpWitness) -> bool {
 pub fn prove_session_secret(k: &[u8], user: &str, server: &str, ts: u64) -> String {
     use base64::Engine;
     let msg = format!("hdap:code:{user}:{server}:{ts}");
+    let mac = hmac_sha256(k, msg.as_bytes());
+    base64::engine::general_purpose::STANDARD.encode(mac)
+}
+
+/// Factor 3 bound to the *server-issued* challenge (v2 / Teleios).
+///
+/// `challenge_text` is `Challenge::canonical_text()`, which already carries
+/// the nonce and the Unix-UTC `ts` chosen by the server. The client therefore
+/// cannot pick a different timestamp (a common source of timezone-dependent
+/// "factor 3 failed" errors) and cannot replay a proof from another login.
+pub fn prove_session_secret_bound(
+    k: &[u8],
+    user: &str,
+    server: &str,
+    challenge_text: &str,
+) -> String {
+    use base64::Engine;
+    let msg = format!("hdap:f3:v2:{user}:{server}:{challenge_text}");
     let mac = hmac_sha256(k, msg.as_bytes());
     base64::engine::general_purpose::STANDARD.encode(mac)
 }
@@ -113,7 +142,10 @@ pub fn session_token(k: &[u8], server_id: &str, exp: u64) -> String {
 /// ENC public key; the user derives it from its ENC secret key and the
 /// node's published ENC public key. Same `k`, no stored secret.
 pub fn derive_shared_key(local_enc_priv: &StaticSecret, peer_enc_pub: &[u8; 32]) -> [u8; 32] {
-    x25519_shared(local_enc_priv, peer_enc_pub)
+    let mut shared = x25519_shared(local_enc_priv, peer_enc_pub);
+    let key = hkdf_sha256(&shared, &[], KDF_INFO_SESSION);
+    shared.zeroize();
+    key
 }
 
 /// A session bundle produced after successful 3FA.

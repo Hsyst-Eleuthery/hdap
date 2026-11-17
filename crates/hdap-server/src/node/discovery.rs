@@ -306,7 +306,7 @@ impl DiscoveryModule {
                 }
                 Job::Ledger { peer_id } => {
                     let peer = {
-                        let st = node.state.lock().unwrap();
+                        let st = node.lock_state();
                         st.peers.get(&peer_id).cloned()
                     };
                     if let Some(peer) = peer {
@@ -411,7 +411,7 @@ impl DiscoveryModule {
         let mut untrusted = 0usize;
         let mut peers = Vec::new();
         {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             for peer in st.peers.values() {
                 if peer.node_id == node.cfg.server_id {
                     continue;
@@ -492,7 +492,7 @@ impl DiscoveryModule {
             return Response::json(200, json!({ "queued": false, "known": true }).to_string());
         }
         {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             if let Some(existing) = st.peers.get(&advert.node_id) {
                 if existing.sign_pub_hex != advert.sign_pub_hex {
                     return Response::json(409, json_err("peer id already uses another key"));
@@ -545,7 +545,7 @@ pub fn directory_digest(node: &Node) -> String {
 }
 
 pub(crate) fn adverts(node: &Node) -> Vec<PeerAdvert> {
-    let st = node.state.lock().unwrap();
+    let st = node.lock_state();
     st.peers
         .values()
         .filter(|p| p.node_id != node.cfg.server_id)
@@ -565,7 +565,7 @@ pub(crate) fn own_endpoint(node: &Node) -> String {
 }
 
 pub(crate) fn own_sign_pub(node: &Node) -> String {
-    let seed = node.state.lock().unwrap().node_sign_seed;
+    let seed = node.lock_state().node_sign_seed;
     hex::encode(
         ed25519_dalek::SigningKey::from_bytes(&seed)
             .verifying_key()
@@ -581,7 +581,7 @@ pub(crate) fn handshake_body(node: &Node) -> String {
         "tls_pin": node.tls_pin,
         "directory_digest": directory_digest(node),
         "ledger_digest": crate::node::ledger::digest(
-            &node.state.lock().unwrap().prytaneion
+            &node.lock_state().prytaneion
         ),
     })
     .to_string()
@@ -667,7 +667,7 @@ fn verify_candidate(node: &Node, advert: &PeerAdvert, now: u64) -> bool {
     }
 
     {
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         match st.peers.get(&advert.node_id) {
             Some(existing) if existing.sign_pub_hex != advert.sign_pub_hex => return false,
             Some(_) => {}
@@ -698,7 +698,7 @@ fn verify_candidate(node: &Node, advert: &PeerAdvert, now: u64) -> bool {
 
 fn exchange_directory(node: &Node, peer_id: &str, now: u64) -> bool {
     let peer = {
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         st.peers.get(peer_id).cloned()
     };
     let Some(peer) = peer else { return false };
@@ -713,7 +713,7 @@ fn exchange_directory(node: &Node, peer_id: &str, now: u64) -> bool {
     client.io_timeout = Duration::from_secs(6);
     let digest = directory_digest(node);
     let path = format!("/homospondoi/directory?digest={digest}");
-    let seed = node.state.lock().unwrap().node_sign_seed;
+    let seed = node.lock_state().node_sign_seed;
     let sign_key = ed25519_dalek::SigningKey::from_bytes(&seed);
     let Ok(resp) = client.get_with_fed_auth(&path, &node.cfg.server_id, &sign_key, None) else {
         return false;
@@ -737,7 +737,7 @@ fn exchange_directory(node: &Node, peer_id: &str, now: u64) -> bool {
 
 fn health_check(node: &Node, peer_id: &str, _now: u64) -> bool {
     let peer = {
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         st.peers.get(peer_id).cloned()
     };
     let Some(peer) = peer else { return false };
@@ -779,7 +779,7 @@ fn gossip(node: &Node, advert: &PeerAdvert, event_id: &str, ttl: u8, skip: Optio
         "peer": advert.to_json(),
     })
     .to_string();
-    let seed = node.state.lock().unwrap().node_sign_seed;
+    let seed = node.lock_state().node_sign_seed;
     let sign_key = ed25519_dalek::SigningKey::from_bytes(&seed);
     for peer in peers.into_iter().take(GOSSIP_FANOUT) {
         let Ok(client) = FedHttpClient::new(&peer.endpoint, peer.tls_pin.clone()) else {
@@ -849,7 +849,7 @@ mod tests {
     }
 
     fn add_known(node: &Node, peer: &PeerAdvert) {
-        node.state.lock().unwrap().peers.insert(
+        node.lock_state().peers.insert(
             peer.node_id.clone(),
             PeerRecord {
                 node_id: peer.node_id.clone(),
@@ -870,7 +870,7 @@ mod tests {
     }
 
     fn known(node: &Node) -> BTreeSet<String> {
-        node.state.lock().unwrap().peers.keys().cloned().collect()
+        node.lock_state().peers.keys().cloned().collect()
     }
 
     /// A knows B, B knows C. A must verify C through B's directory, and all
@@ -940,7 +940,7 @@ mod tests {
             tls_pin: None,
         };
         {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             st.peers
                 .insert("pyle-core".into(), record("pyle-core", "127.0.0.1:9001"));
             st.peers
@@ -966,7 +966,8 @@ mod tests {
             query: Default::default(),
             headers,
             body: Vec::new(),
-        };
+                peer: None,
+};
         let resp = node.discovery.handle_bubble(&node, &req);
         assert_eq!(resp.status, 200);
         let v: Value = serde_json::from_slice(&resp.body).unwrap();
@@ -1011,7 +1012,8 @@ mod tests {
             query: BTreeMap::from([("digest".to_string(), digest.clone())]),
             headers: BTreeMap::new(),
             body: Vec::new(),
-        };
+                peer: None,
+};
         let resp = a.discovery.handle_directory(&a, &req);
         assert_eq!(resp.status, 200);
         let body: Value = serde_json::from_slice(&resp.body).unwrap();

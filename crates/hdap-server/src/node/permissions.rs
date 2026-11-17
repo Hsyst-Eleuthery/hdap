@@ -78,7 +78,7 @@ impl PermissionsModule {
                     eprintln!("WARNING: adeia document accepted without signature (backward compatibility)");
                 }
 
-                let mut st = node.state.lock().unwrap();
+                let mut st = node.lock_state();
                 // The `adeia.hdap` document is the source of truth: it is what
                 // the directory shows and what federation ships to a mirroring
                 // pyle. Store it as a blob *and* refresh the ACL cache, so the
@@ -142,7 +142,7 @@ impl PermissionsModule {
             return Response::json(400, json_err("cannot transfer to yourself"));
         }
         let payload = transfer_payload(&old_owner, &new_owner, &targets);
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         let (Some(old_pub), Some(new_pub)) = (
             st.users.get(&old_owner).and_then(|u| u.sign_pub_bytes()),
             st.users.get(&new_owner).and_then(|u| u.sign_pub_bytes()),
@@ -293,7 +293,7 @@ mod tests {
     fn node_with_session(user_id: &str) -> Node {
         let node = Node::new(Config::default());
         {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             let seed = st.node_sign_seed;
             st.users.insert(
                 user_id.to_string(),
@@ -333,11 +333,12 @@ mod tests {
             query: std::collections::BTreeMap::new(),
             headers,
             body: body.as_bytes().to_vec(),
+        peer: None,
         }
-    }
+}
 
     fn sign_adeia(node: &Node, owner: &str, text: &str) -> String {
-        let seed = node.state.lock().unwrap().node_sign_seed;
+        let seed = node.lock_state().node_sign_seed;
         let sign_key = hdap_core::crypto::SigningKey::from_bytes(&seed);
         let mut d = hdap_core::doc::parse(text).unwrap();
         let mut sig = Signature {
@@ -368,7 +369,7 @@ mod tests {
         let resp = node.permissions.handle_adeia(&node, &req(&signed_text));
         assert_eq!(resp.status, 200, "{}", String::from_utf8_lossy(&resp.body));
 
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         assert_eq!(
             st.permissions.get(owner).map(String::as_str),
             Some(signed_text.as_str())
@@ -389,7 +390,7 @@ mod tests {
             .permissions
             .handle_adeia(&node, &req("not a hdap document"));
         assert_eq!(resp.status, 400);
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         assert!(!st.permissions.contains_key(owner));
         assert!(!st.objects.contains_key(&State::key(owner, "adeia.hdap")));
     }

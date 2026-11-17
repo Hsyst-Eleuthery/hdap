@@ -91,7 +91,7 @@ impl IdentityModule {
             return Response::json(401, json_err("prosopeion self-signature invalid"));
         }
 
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         if st.users.contains_key(&user_id) {
             return Response::json(409, json_err("identity already registered"));
         }
@@ -265,7 +265,7 @@ impl IdentityModule {
             return Err(Response::json(400, json_err("properties incomplete")));
         }
 
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         if let Some(existing) = st.users.get(&user_id) {
             if existing.sign_pub_hex != pubkey_hex {
                 return Err(Response::json(
@@ -368,7 +368,7 @@ impl IdentityModule {
         }
 
         let (stored_pub, current_home, properties, adeia, old_text) = {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             let Some(user) = st.users.get(&user_id) else {
                 return Response::json(404, json_err("user not registered"));
             };
@@ -422,7 +422,7 @@ impl IdentityModule {
         }
 
         let bytes = text.as_bytes();
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         let sealed = hdap_core::crypto::aead_seal(&st.master_key, bytes);
         st.objects.insert(
             State::key(&user_id, "diadosi.hdap"),
@@ -444,7 +444,7 @@ impl IdentityModule {
     /// after login, so the first snapshot already shows the backup as home.
     pub fn maybe_promote_fallback(&self, node: &crate::node::Node, user_id: &str) -> bool {
         let (home, peer) = {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             let Some(user) = st.users.get(user_id) else {
                 return false;
             };
@@ -512,7 +512,7 @@ impl IdentityModule {
             Ok(resp) if (200..300).contains(&resp.status) => return false,
             _ => {}
         }
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         if let Some(user) = st.users.get_mut(user_id) {
             if user.home_pyle == home {
                 user.home_pyle = node.cfg.server_id.clone();
@@ -538,7 +538,7 @@ impl IdentityModule {
         outgoing["ttl"] = serde_json::json!(ttl);
         let payload = outgoing.to_string();
         let peers: Vec<_> = {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             st.peers
                 .values()
                 .filter(|p| !p.endpoint.trim().is_empty())
@@ -567,7 +567,7 @@ impl IdentityModule {
         if nickname.is_empty() && user_id.is_empty() {
             return Response::json(400, json_err("nickname or user_id query required"));
         }
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         let found = if !user_id.is_empty() {
             st.users.get(&user_id)
         } else {
@@ -709,7 +709,7 @@ impl IdentityModule {
             return Err(Response::json(400, json_err("invalid global id")));
         }
         // For existing identities, require session user to match (prevent account takeover)
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         let is_new = !st.users.contains_key(&user_id);
         if !is_new {
             let session_user = match session_user {
@@ -860,7 +860,7 @@ mod house_move_tests {
             (uid.as_str(), "pyle-new", 2)
         );
         {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             assert_eq!(
                 st.users[&uid].sign_pub_hex,
                 hex::encode(key.verifying_key().to_bytes())
@@ -946,7 +946,7 @@ mod house_move_tests {
         let proxy = signed_diadosi(user, &key, 1, "pyle-a", &["pyle-b"], &properties, &adeia);
 
         {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             st.users.insert(
                 uid.clone(),
                 UserRecord {
@@ -993,7 +993,7 @@ mod house_move_tests {
             m.maybe_promote_fallback(&node, &uid),
             "a listed backup must take over when the home does not answer"
         );
-        assert_eq!(node.state.lock().unwrap().users[&uid].home_pyle, "pyle-b");
+        assert_eq!(node.lock_state().users[&uid].home_pyle, "pyle-b");
         assert!(
             !m.maybe_promote_fallback(&node, &uid),
             "once promoted, this pyle is the home and must stop probing"
@@ -1009,6 +1009,6 @@ mod house_move_tests {
         body["signature"] = json!(base64::engine::general_purpose::STANDARD.encode([0u8; 64]));
         let err = m.apply_house_move(&node, &body, None, None).unwrap_err();
         assert_eq!(err.status, 401);
-        assert!(node.state.lock().unwrap().users.is_empty());
+        assert!(node.lock_state().users.is_empty());
     }
 }

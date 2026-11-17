@@ -12,6 +12,7 @@
 
 pub mod auth;
 pub mod bandwidth;
+pub mod cleanup;
 pub mod discovery;
 pub mod federation;
 pub mod identity;
@@ -37,11 +38,12 @@ use transfer::TransferModule;
 
 use crate::config::Config;
 use crate::http::{Request, Response};
+use crate::motd::{self, MotdContext};
 use crate::store::State as StoreState;
+use hdap_core::time::{is_expired, unix_secs_utc};
 use rand_core::RngCore;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use hdap_core::doc::parse as parse_doc;
@@ -82,7 +84,7 @@ pub fn mochthos_challenge(server_id: &str) -> String {
     format!("hdap-mochthos:{server_id}")
 }
 
-pub const SERVER_INTEGRITY_TAG: &str = "hdap-server/v1";
+pub const SERVER_INTEGRITY_TAG: &str = "hdap-server/v2";
 pub const SEAL_OVERHEAD: usize = 12 + 16;
 
 /// A node: owns a `State`, a clock and config; demuxes HTTP requests.
@@ -102,6 +104,11 @@ pub struct Node {
     pub advertise_endpoint: Option<String>,
     /// Wall-clock for deterministic tests; uses system time when 0.
     clock: Arc<AtomicU64>,
+    /// Set when a lock was found poisoned. Requests then get a clean 503
+    /// instead of a cascade of panics (AME-06).
+    lock_poisoned: AtomicBool,
+    /// Unix UTC seconds when this process started (used by Ángelma uptime).
+    started_at: u64,
 
     // Submodules
     auth: AuthModule,
@@ -150,6 +157,8 @@ impl Node {
             tls_pin: None,
             db: None,
             advertise_endpoint: None,
+            lock_poisoned: AtomicBool::new(false),
+            started_at: unix_secs_utc(),
             auth: AuthModule::new(cfg.clone()),
             bandwidth: BandwidthModule::new(cfg.clone()),
             federation: FederationModule::new(cfg.clone()),
@@ -182,8 +191,51 @@ impl Node {
         }
     }
 
+    /// Acquire the global state lock without ever panicking. A poisoned mutex
+    /// means a task panicked while holding it; we recover the guard (so the
+    /// node keeps serving) and flag the node as degraded so `handle` returns a
+    /// clean 503 instead of hundreds of panics.
+    pub fn lock_state(&self) -> MutexGuard<'_, StoreState> {
+        match self.state.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                self.lock_poisoned.store(true, Ordering::Release);
+                crate::hlog!(error, "lock", "state mutex poisoned; node degraded");
+                poisoned.into_inner()
+            }
+        }
+    }
+
+    /// Live facts used by the Ángelma (MOTD) renderer.
+    pub fn motd_context(&self) -> MotdContext {
+        let now = self.now();
+        let st = self.lock_state();
+        MotdContext {
+            server_id: self.cfg.server_id.clone(),
+            version: env!("CARGO_PKG_VERSION"),
+            protocol_version: hdap_core::PROTOCOL_VERSION,
+            protocol_codename: hdap_core::PROTOCOL_CODENAME,
+            started_at: self.started_at,
+            now,
+            users: st.users.len(),
+            files: st.objects.len(),
+            sessions: st.sessions.len(),
+            peers: st.peers.len(),
+            tls: self.tls_pin.is_some(),
+            rate_limit_per_sec: self.cfg.rate_limit_per_sec,
+        }
+    }
+
+    /// Ángelma rendered with the current node state.
+    pub fn motd(&self) -> String {
+        motd::render(&self.cfg.motd, &self.motd_context())
+    }
+
     /// Dispatch a request to the matching handler.
     pub fn handle(&self, req: &Request) -> Response {
+        if self.lock_poisoned.load(Ordering::Acquire) {
+            return Response::json(503, json_err("node degraded: state lock poisoned"));
+        }
         if self.rate_limited(req) {
             return Response::json(429, json_err("rate limit exceeded"));
         }
@@ -204,12 +256,10 @@ impl Node {
         let method = req.method.as_str();
         let mut parts = req.path.trim_start_matches('/').splitn(3, '/');
         let primary = parts.next().unwrap_or("");
-        eprintln!(
-            "DISPATCH: method={} path={} primary={}",
-            method, req.path, primary
-        );
+        crate::hlog!(debug, "http", "{} {}", method, primary);
         match (method, primary) {
             ("GET", "health") => self.handle_health(),
+            ("GET", "motd") => self.handle_motd(),
             ("GET", "bubble") => self.discovery.handle_bubble(self, req),
             ("GET", "pyle") => {
                 if parts.next() == Some("integrity") {
@@ -291,13 +341,23 @@ impl Node {
         if self.cfg.rate_limit_per_sec == 0 {
             return false;
         }
+        // The bucket key comes from the kernel's peer address, never from a
+        // client-written header. A spoofable label used to let abusers escape
+        // the limit while honest clients shared one bucket (AME-21).
         let key = req
-            .headers
-            .get("x-hdap-peer")
-            .cloned()
-            .unwrap_or_else(|| "local".to_string());
+            .peer
+            .map(|addr| addr.ip().to_string())
+            .unwrap_or_else(|| "direct".to_string());
         let now = self.now();
-        let mut st = self.state.lock().unwrap();
+        let mut st = self.lock_state();
+        // Reclaim buckets that have been idle for a while so a rotating source
+        // port/IP cannot grow this map without bound.
+        if st.rate.len() > 4096 {
+            st.rate.retain(|_, q| !q.is_empty());
+            if st.rate.len() > 4096 {
+                st.rate.clear();
+            }
+        }
         let bucket = st.rate.entry(key).or_default();
         while bucket.front().is_some_and(|t| now.saturating_sub(*t) >= 1) {
             bucket.pop_front();
@@ -311,10 +371,11 @@ impl Node {
 
     fn handle_health(&self) -> Response {
         let node_sign_pub = {
-            let seed = self.state.lock().unwrap().node_sign_seed;
+            let seed = self.lock_state().node_sign_seed;
             let key = ed25519_dalek::SigningKey::from_bytes(&seed);
             hex::encode(key.verifying_key().to_bytes())
         };
+        let ctx = self.motd_context();
         let mut body = serde_json::json!({
             "status": "ok",
             "server_id": self.cfg.server_id,
@@ -322,11 +383,34 @@ impl Node {
             "node_sign_pub": node_sign_pub,
             "pylaia_required": self.cfg.require_entry_pow,
             "pylaia_target": self.cfg.pylaia_target,
+            "protocol_version": hdap_core::PROTOCOL_VERSION,
+            "protocol_codename": hdap_core::PROTOCOL_CODENAME,
+            "version": env!("CARGO_PKG_VERSION"),
+            "time_utc": ctx.now,
+            "date_utc": motd::format_unix_utc(ctx.now),
+            "uptime_secs": ctx.now.saturating_sub(ctx.started_at),
+            "users": ctx.users,
+            "files": ctx.files,
+            "motd": motd::render(&self.cfg.motd, &ctx),
         });
         if let Some(pin) = &self.tls_pin {
             body["tls_pin"] = serde_json::json!(pin);
         }
         Response::json(200, body.to_string())
+    }
+
+    /// `GET /motd` — Ángelma, the server's message of the day.
+    fn handle_motd(&self) -> Response {
+        let ctx = self.motd_context();
+        Response::json(
+            200,
+            serde_json::json!({
+                "motd": motd::render(&self.cfg.motd, &ctx),
+                "time_utc": ctx.now,
+                "server_id": ctx.server_id,
+            })
+            .to_string(),
+        )
     }
 
     fn handle_integrity(&self) -> Response {
@@ -346,9 +430,9 @@ impl Node {
                 .get("authorization")
                 .and_then(|v| v.strip_prefix("Bearer ").map(|s| s.to_string()))
         })?;
-        let st = self.state.lock().unwrap();
+        let st = self.lock_state();
         let sess = st.sessions.get(&token)?;
-        if sess.exp < self.now() {
+        if is_expired(self.now(), sess.exp) {
             return None;
         }
         Some(sess.user_id.clone())
@@ -362,7 +446,7 @@ impl Node {
         if matches!(need, Access::Read) && is_public_identity_doc(path) {
             return true;
         }
-        let st = self.state.lock().unwrap();
+        let st = self.lock_state();
         if requester == owner {
             // A completed transfer is an irrevocable read-only cession for the
             // cedente (§11.3). `adeia` edits cannot buy write access back.
@@ -395,7 +479,7 @@ impl Node {
         }
         let key = StoreState::key(owner, path);
         let snapshot = {
-            let st = self.state.lock().unwrap();
+            let st = self.lock_state();
             st.replica_acls.get(&key).cloned()
         };
         let Some(acl) = snapshot else {
@@ -414,7 +498,7 @@ impl Node {
         if is_public_identity_doc(path) {
             return true;
         }
-        let st = self.state.lock().unwrap();
+        let st = self.lock_state();
         st.permissions
             .get(owner)
             .or_else(|| {
@@ -557,9 +641,9 @@ fn path_in_scope(path: &str, scope: &str) -> bool {
 /// Attach a durable store and load whatever it already holds.
 impl Node {
     pub fn with_db(&mut self, db: Arc<crate::db::Db>) -> crate::db::DbResult<()> {
-        self.state.lock().unwrap().whoami = self.cfg.server_id.clone();
+        self.lock_state().whoami = self.cfg.server_id.clone();
         let restored = db.load()?;
-        let mut st = self.state.lock().unwrap();
+        let mut st = self.lock_state();
         match restored {
             Some(loaded) => {
                 let mut loaded = loaded;
@@ -579,6 +663,7 @@ impl Node {
                 st.node_sign_seed = seed;
             }
         }
+        drop(st);
         self.db = Some(db);
         Ok(())
     }
@@ -589,7 +674,7 @@ impl Node {
             .db
             .as_ref()
             .ok_or_else(|| crate::db::DbError::Corrupt("no database attached".to_string()))?;
-        let st = self.state.lock().unwrap();
+        let st = self.lock_state();
         db.flush(&st)
     }
 }
@@ -609,7 +694,7 @@ pub(crate) fn notify_deletion(
     skip: Option<&str>,
 ) -> usize {
     let (node_id, sign_key, peers) = {
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         let ids = st.watchers.get(owner).cloned().unwrap_or_default();
         let peers: Vec<_> = ids
             .iter()
@@ -623,7 +708,7 @@ pub(crate) fn notify_deletion(
         )
     };
     let provenance = {
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         st.prytaneion.get(content_hash).map(|e| {
             (
                 e.origin_user_pubkey.clone(),
@@ -672,8 +757,9 @@ mod tests {
             query: BTreeMap::new(),
             headers: BTreeMap::new(),
             body: Vec::new(),
+        peer: None,
         }
-    }
+}
 
     /// Scenario B: a new `adeia` edition (or a house move) must not take an
     /// already public replica offline. The frozen snapshot keeps serving old
@@ -705,7 +791,7 @@ mod tests {
         .render();
         let new_private = adeia_doc(owner, 2, Some("prev".into()), 1000, &[], None).render();
         {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             st.permissions.insert(owner.to_string(), new_private);
             st.replica_acls
                 .insert(StoreState::key(owner, path), old_public);
@@ -755,7 +841,7 @@ mod tests {
         ];
         let acl = adeia_doc(owner, 1, None, 900, &perms, None).render();
         {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             st.permissions.insert(owner.into(), acl);
         }
 
@@ -812,7 +898,7 @@ mod tests {
         let white_acl =
             adeia_doc_with_diadosi(owner, 1, None, 900, &allow_reader, None, Some(&white)).render();
         {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             st.permissions.insert(owner.into(), white_acl);
         }
         assert!(
@@ -827,7 +913,7 @@ mod tests {
         let black_acl =
             adeia_doc_with_diadosi(owner, 1, None, 900, &allow_reader, None, Some(&black)).render();
         {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             st.permissions.insert(owner.into(), black_acl.clone());
             st.replica_acls
                 .insert(StoreState::key(owner, path), black_acl);
@@ -860,7 +946,7 @@ mod tests {
                 ..Config::default()
             });
             node.with_db(db).unwrap();
-            node.state.lock().unwrap().users.insert(
+            node.lock_state().users.insert(
                 "jose_0123456789abcdef".into(),
                 UserRecord {
                     user_id: "jose_0123456789abcdef".into(),

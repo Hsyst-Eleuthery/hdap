@@ -239,11 +239,11 @@ pub fn pull_from_peer(
     let client = FedHttpClient::new(&peer.endpoint, peer.tls_pin.clone())
         .map_err(|e| format!("bad peer endpoint: {e}"))?;
     let local_digest = {
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         digest(&st.prytaneion)
     };
     let path = format!("/homospondoi/ledger?digest={local_digest}");
-    let seed = node.state.lock().unwrap().node_sign_seed;
+    let seed = node.lock_state().node_sign_seed;
     let sign_key = ed25519_dalek::SigningKey::from_bytes(&seed);
     let resp = client
         .get_with_fed_auth(&path, &node.cfg.server_id, &sign_key, None)
@@ -254,7 +254,7 @@ pub fn pull_from_peer(
     let value: Value =
         serde_json::from_slice(&resp.body).map_err(|_| "peer sent non-json ledger")?;
     let merged = {
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         merge_body(&mut st, &value)
     };
     Ok(merged)
@@ -272,10 +272,10 @@ pub fn push_to_peer(
     let client = FedHttpClient::new(&peer.endpoint, peer.tls_pin.clone())
         .map_err(|e| format!("bad peer endpoint: {e}"))?;
     let body = {
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         serde_json::json!({ "entries": snapshot(&st.prytaneion) }).to_string()
     };
-    let seed = node.state.lock().unwrap().node_sign_seed;
+    let seed = node.lock_state().node_sign_seed;
     let sign_key = ed25519_dalek::SigningKey::from_bytes(&seed);
     let resp = client
         .post_with_fed_auth("/homospondoi/ledger", &body, &node.cfg.server_id, &sign_key)
@@ -299,7 +299,7 @@ pub fn find_on_peer(
     }
     let client = FedHttpClient::new(&peer.endpoint, peer.tls_pin.clone()).ok()?;
     let path = format!("/homospondoi/ledger?hash={hash}");
-    let seed = node.state.lock().unwrap().node_sign_seed;
+    let seed = node.lock_state().node_sign_seed;
     let sign_key = ed25519_dalek::SigningKey::from_bytes(&seed);
     let resp = client
         .get_with_fed_auth(&path, &node.cfg.server_id, &sign_key, None)

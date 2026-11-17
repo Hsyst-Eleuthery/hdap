@@ -292,7 +292,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
         // Read the counts *after* the load, so "retomado" reflects the file.
-        let n_users = node.state.lock().unwrap().users.len();
+        let n_users = node.lock_state().users.len();
         let resuming = n_users > 0;
         println!(
             "hdap-server: banco {} ({})",

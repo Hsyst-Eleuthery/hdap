@@ -110,7 +110,7 @@ impl FederationModule {
             .and_then(|v| v.as_str())
             .unwrap_or("");
         let (known, peers_len) = {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             let known = st.peers.contains_key(node_id);
             if let Some(existing) = st.peers.get(node_id) {
                 if existing.sign_pub_hex != pubkey_hex {
@@ -146,7 +146,7 @@ impl FederationModule {
         if caller_digest != digest {
             node.discovery.enqueue_exchange(node_id.to_string());
         }
-        let ledger_digest = ledger::digest(&node.state.lock().unwrap().prytaneion);
+        let ledger_digest = ledger::digest(&node.lock_state().prytaneion);
         if caller_ledger_digest != ledger_digest {
             node.discovery.enqueue_ledger(node_id.to_string());
         }
@@ -196,7 +196,7 @@ impl FederationModule {
             return Response::json(400, json_err("hash query required"));
         }
         let candidates: Vec<crate::store::Blob> = {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             st.objects
                 .values()
                 .filter(|b| b.hash == hash)
@@ -215,7 +215,7 @@ impl FederationModule {
             return Response::json(403, json_err("requester is not allowed to read this blob"));
         };
         let plain = {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             match hdap_core::crypto::aead_open(&st.master_key, &blob.bytes) {
                 Ok(p) => p,
                 Err(_) => return Response::json(500, json_err("storage decryption failed")),
@@ -224,7 +224,7 @@ impl FederationModule {
         // Origin provenance travels with the bytes so the puller can register
         // the replica in its own `prytaneion` under the real origin.
         let entry = {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             st.prytaneion.get(&hash).cloned()
         };
         let origin_server = entry
@@ -240,7 +240,7 @@ impl FederationModule {
             .map(|e| e.origin_user_pubkey.clone())
             .filter(|s| !s.is_empty())
             .or_else(|| {
-                let st = node.state.lock().unwrap();
+                let st = node.lock_state();
                 st.users.get(&origin_user).map(|u| u.sign_pub_hex.clone())
             })
             .unwrap_or_default();
@@ -305,7 +305,7 @@ impl FederationModule {
             .or_default()
             .insert(peer.node_id);
         let (user_json, prosopeion, adeia, raw) = {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             let Some(user) = st.users.get(&owner) else {
                 return Response::json(404, json_err("owner not registered here"));
             };
@@ -400,7 +400,7 @@ impl FederationModule {
             return None;
         }
         let sig = crate::node::sig_from_b64(sig_b64)?;
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         let key = format!("{}:{}", node_id, nonce);
         if st.fed_nonces.contains_key(&key) {
             return None; // replay
@@ -441,7 +441,7 @@ impl FederationModule {
             return Response::json(400, json_err("content_hash required"));
         }
         // Crítica 3: validate that the peer actually has this content or is authorized to sync it
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         if !st
             .objects
             .values()
@@ -506,7 +506,7 @@ impl FederationModule {
         if op_id.is_empty() {
             return Response::json(400, json_err("operation_id required for pheme update"));
         }
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         let applied_key = format!("pheme_applied:{op_id}");
         if st.fed_applied.contains(&applied_key) {
             return Response::json(200, serde_json::json!({ "target": target, "score": st.pheme.get(&target).copied().unwrap_or(0), "duplicate": true }).to_string());
@@ -541,7 +541,7 @@ impl FederationModule {
         };
         if req.method == "GET" {
             if let Some(hash) = req.query.get("hash") {
-                let st = node.state.lock().unwrap();
+                let st = node.lock_state();
                 return match st.prytaneion.get(hash) {
                     Some(entry) => Response::json(
                         200,
@@ -551,7 +551,7 @@ impl FederationModule {
                 };
             }
             let want = req.query.get("digest").map(String::as_str).unwrap_or("");
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             return Response::json(200, ledger::exchange_body(&st, want).to_string());
         }
         let body = match require_json(&req.body) {
@@ -559,7 +559,7 @@ impl FederationModule {
             Err(e) => return e,
         };
         let (merged, digest) = {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             let merged = ledger::merge_body(&mut st, &body);
             (merged, ledger::digest(&st.prytaneion))
         };
@@ -608,7 +608,7 @@ impl FederationModule {
         }
         let applied_key = format!("prytaneion_applied:{op_id}");
         let (removed, op_id) = {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             if st.fed_applied.contains(&applied_key) {
                 return Response::json(
                     200,
@@ -755,8 +755,9 @@ mod tests {
                 .collect(),
             headers,
             body: Vec::new(),
+        peer: None,
         }
-    }
+}
 
     fn signed_fed_req(
         node_id: &str,
@@ -783,8 +784,9 @@ mod tests {
             query: BTreeMap::new(),
             headers,
             body: body.as_bytes().to_vec(),
+        peer: None,
         }
-    }
+}
 
     /// Idempotency must outlive the replay window: the `pheme`/`prytaneion`
     /// op-id guard is a separate, unpruned set, so a peer cannot re-apply the
@@ -803,7 +805,7 @@ mod tests {
                 .verifying_key()
                 .to_bytes(),
         );
-        node.state.lock().unwrap().peers.insert(
+        node.lock_state().peers.insert(
             peer_id.to_string(),
             PeerRecord {
                 node_id: peer_id.to_string(),
@@ -827,7 +829,7 @@ mod tests {
         );
         assert_eq!(r1.status, 200, "{}", String::from_utf8_lossy(&r1.body));
         assert_eq!(
-            node.state.lock().unwrap().pheme.get(target).copied(),
+            node.lock_state().pheme.get(target).copied(),
             Some(5)
         );
 
@@ -844,7 +846,7 @@ mod tests {
             "a replayed op-id must be reported as duplicate"
         );
         assert_eq!(
-            node.state.lock().unwrap().pheme.get(target).copied(),
+            node.lock_state().pheme.get(target).copied(),
             Some(5),
             "the score must not be applied twice after the replay window"
         );
@@ -865,7 +867,7 @@ mod tests {
                 .verifying_key()
                 .to_bytes(),
         );
-        node.state.lock().unwrap().peers.insert(
+        node.lock_state().peers.insert(
             peer_id.to_string(),
             PeerRecord {
                 node_id: peer_id.to_string(),
@@ -880,7 +882,7 @@ mod tests {
         let plain = b"conteudo privado";
         let private_hash = sha256_hex(plain);
         {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             st.users.insert(
                 owner.to_string(),
                 UserRecord {
@@ -980,7 +982,7 @@ mod tests {
                 .verifying_key()
                 .to_bytes(),
         );
-        node.state.lock().unwrap().peers.insert(
+        node.lock_state().peers.insert(
             peer_id.to_string(),
             PeerRecord {
                 node_id: peer_id.to_string(),
@@ -991,7 +993,7 @@ mod tests {
         );
         let hash = "b".repeat(64);
         {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             st.prytaneion.insert(
                 hash.clone(),
                 crate::store::PrytaneionEntry {
@@ -1007,7 +1009,7 @@ mod tests {
                 },
             );
         }
-        let digest = crate::node::ledger::digest(&node.state.lock().unwrap().prytaneion);
+        let digest = crate::node::ledger::digest(&node.lock_state().prytaneion);
         let r = node.federation.handle_fed(
             &node,
             &signed_fed_get(
@@ -1048,7 +1050,7 @@ mod tests {
         let plain = b"keep me";
 
         {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             st.mirrors.insert(
                 owner.to_string(),
                 crate::store::MirrorOrigin {
@@ -1077,7 +1079,7 @@ mod tests {
                 .verifying_key()
                 .to_bytes(),
         );
-        node.state.lock().unwrap().peers.insert(
+        node.lock_state().peers.insert(
             attacker.to_string(),
             PeerRecord {
                 node_id: attacker.to_string(),
@@ -1145,10 +1147,11 @@ mod tests {
             query: BTreeMap::new(),
             headers: BTreeMap::new(),
             body: body.into_bytes(),
-        };
+                peer: None,
+};
         let r = node.federation.handle_fed(&node, &req);
         assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(&r.body));
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         assert_eq!(
             st.peers.get(&peer_id).map(|p| p.sign_pub_hex.as_str()),
             Some(pub_hex.as_str())

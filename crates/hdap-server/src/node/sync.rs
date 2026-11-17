@@ -28,7 +28,7 @@ impl SyncModule {
         // the snapshot means the user's first login after the fall sees their
         // local identity as authoritative, not a dead pyle's stub.
         node.identity.maybe_promote_fallback(node, &user_id);
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         Response::json(
             200,
             self.sync_snapshot_json(node, &st, &user_id).to_string(),
@@ -74,12 +74,12 @@ impl SyncModule {
                     continue;
                 }
                 let Some(text) = text.as_str() else { continue };
-                let mut st = node.state.lock().unwrap();
+                let mut st = node.lock_state();
                 node.storage
                     .reindex_config_doc(&mut st, &user_id, name, text.as_bytes());
             }
         }
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         Response::json(
             200,
             self.sync_snapshot_json(node, &st, &user_id).to_string(),

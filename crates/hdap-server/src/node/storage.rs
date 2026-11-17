@@ -82,9 +82,9 @@ impl StorageModule {
         }
         let key = State::key(&owner, &path);
         let hash = content_hash(&req.body);
-        let master_key = node.state.lock().unwrap().master_key;
+        let master_key = node.lock_state().master_key;
         let sealed = aead_seal(&master_key, &req.body);
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
 
         // Per-user storage quota (`moira`, §16.4); 0 = unlimited. Checked
         // *before* payment so a refused upload never burns band credit or a
@@ -324,7 +324,7 @@ impl StorageModule {
             return Response::json(403, json_err("forbidden: insufficient permission"));
         }
         let key = State::key(&owner, &path);
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         let Some(blob) = st.objects.get(&key).cloned() else {
             return Response::json(404, json_err("file not found"));
         };
@@ -363,7 +363,7 @@ impl StorageModule {
         {
             return Response::json(403, json_err("forbidden: insufficient permission"));
         }
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         // Aggregate under each first segment: a subdirectory (more `/`
         // segments follow) or a direct file (the whole remainder is the name).
         let mut dirs: std::collections::BTreeSet<String> = Default::default();
@@ -435,7 +435,7 @@ impl StorageModule {
         }
         let key = State::key(&owner, &path);
         let (hash, deletion, operation_id) = {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             // Capture the hash and plaintext before the blob is gone: the hash
             // identifies the replicas to retract, and config-doc deletions must
             // retract their structured side effects (permissions/aliases).
@@ -602,7 +602,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn signed_upload_req(node: &Node, owner: &str, path: &str, size: usize) -> Request {
-        let seed = node.state.lock().unwrap().node_sign_seed;
+        let seed = node.lock_state().node_sign_seed;
         let sign_key = ed25519_dalek::SigningKey::from_bytes(&seed);
         let data = vec![0u8; size];
         let sphragis = base64::engine::general_purpose::STANDARD
@@ -619,8 +619,9 @@ mod tests {
             query,
             headers,
             body: data,
+        peer: None,
         }
-    }
+}
 
     /// A refused upload must not charge the user: the moira quota is checked
     /// *before* the band debit, so a 413 leaves `choregia` untouched.
@@ -633,7 +634,7 @@ mod tests {
         };
         let node = Node::new(cfg);
         {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             // Extract node_sign_seed before mutable borrow
             let seed = st.node_sign_seed;
             // Create user with signing key
@@ -670,7 +671,7 @@ mod tests {
             .handle_ktema_upload(&node, &signed_upload_req(&node, owner, "big.bin", 200));
         assert_eq!(resp.status, 413, "{}", String::from_utf8_lossy(&resp.body));
         {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             assert_eq!(
                 st.choregia.get(owner).copied(),
                 Some(10_000),
@@ -684,7 +685,7 @@ mod tests {
             .storage
             .handle_ktema_upload(&node, &signed_upload_req(&node, owner, "small.bin", 50));
         assert_eq!(resp.status, 201, "{}", String::from_utf8_lossy(&resp.body));
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         assert_eq!(st.choregia.get(owner).copied(), Some(9_950));
         assert!(st.objects.contains_key(&State::key(owner, "small.bin")));
     }

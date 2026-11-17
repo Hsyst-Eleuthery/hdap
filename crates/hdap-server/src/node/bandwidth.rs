@@ -55,7 +55,7 @@ impl BandwidthModule {
         if !verify_pow(challenge.as_bytes(), nonce, target_bits) {
             return Response::json(400, json_err("proof-of-work not satisfied"));
         }
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         let key = format!("{challenge}|{nonce}");
         if !st.mochthos_used.insert(key) {
             return Response::json(400, json_err("mochthos already redeemed on this pyle"));
@@ -205,7 +205,7 @@ impl BandwidthModule {
             return Response::json(400, json_err("signature must be base64"));
         };
 
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         // Find the owner's band object at this path (idempotent: a repeated
         // countersign of an already-spendable object is a no-op success).
         let Some(band) = st
@@ -283,7 +283,7 @@ impl BandwidthModule {
         let Some(user_id) = node.session_user(req) else {
             return Response::json(401, json_err("unauthorized"));
         };
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         let band: Vec<serde_json::Value> = st
             .band_objects
             .values()
