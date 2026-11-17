@@ -1,9 +1,9 @@
 use crate::i18n::{Lang, Strings};
 use hdap_cli::flow::{
     accept_transfer, authenticate, delete, download, fetch_prices, list_ktema, publish_alias,
-    register, request_transfer, resolve, resolve_cross_pyle, resolve_user,
+    register, request_transfer, resolve, resolve_cross_pyle, resolve_user, rotate_omphalos,
     sync_all as flow_sync_all, transfer_inbox, CrossPyle, FlowError, KtemaEntry, MatrixEntry,
-    SyncSnapshot, TimiQuote, TransferInboxItem, TrustRow,
+    OmphalosRotation, SyncSnapshot, TimiQuote, TransferInboxItem, TrustRow,
 };
 use hdap_cli::http_client::HttpClient;
 use hdap_cli::identity_store;
@@ -160,6 +160,9 @@ pub enum SidePanel {
 /// A background worker result slot, polled by `tick`.
 type Pending<T> = Arc<Mutex<Option<T>>>;
 
+/// `(session, next OTP step, rendered /health payload)` from a connect.
+type ConnectDone = Result<(Session, usize, serde_json::Value), String>;
+
 /// `(new_pyle, installed adeia edition, installed adeia text)`.
 type HouseMoveDone = (String, u64, String);
 
@@ -236,10 +239,20 @@ pub struct App {
     pub otp_step: usize,
     /// In-flight connect attempt (register+auth on a worker thread).
     pub connecting: bool,
-    /// Result of the background connect attempt, polled by `tick`.
-    connect_pending: Option<Pending<Result<(Session, usize), String>>>,
+    /// Result of the background connect attempt, polled by `tick`. The health
+    /// payload is carried along so the Ángelma and the node's UTC clock are
+    /// available without a second round-trip.
+    connect_pending: Option<Pending<ConnectDone>>,
     /// When the in-flight connect started (for the deadline + elapsed label).
     pub connect_started: Option<std::time::Instant>,
+    /// Ángelma (MOTD) advertised by the connected node, already rendered.
+    pub motd: String,
+    /// Unix-UTC second reported by the node at connect time. Protocol time is
+    /// never derived from the local timezone.
+    pub node_time_utc: u64,
+    /// Rotation of the OTP anchor is in flight on a worker thread.
+    pub rotating: bool,
+    rotation_pending: Option<Pending<Result<OmphalosRotation, String>>>,
     /// A directory listing is in flight on a worker thread.
     pub listing: bool,
     /// Result of the background listing, polled by `tick`. A newer request
@@ -453,6 +466,10 @@ impl Default for App {
             connecting: false,
             connect_pending: None,
             connect_started: None,
+            motd: String::new(),
+            node_time_utc: 0,
+            rotating: false,
+            rotation_pending: None,
             listing: false,
             list_pending: None,
             band: 0,
@@ -765,6 +782,7 @@ impl App {
     pub fn tick(&mut self, now: f64, ttl_secs: f64) {
         self.toasts.retain(|t| now - t.born < ttl_secs);
         self.poll_connect();
+        self.poll_rotate_omphalos();
         self.poll_sync();
         self.poll_list();
         self.poll_visit();
@@ -937,7 +955,7 @@ impl App {
         // A persisted step survives restarts; the in-memory value is only the
         // fallback for a brand-new home.
         let step = self.load_otp_step().unwrap_or(self.otp_step);
-        let result: Pending<Result<(Session, usize), String>> = Arc::new(Mutex::new(None));
+        let result: Pending<ConnectDone> = Arc::new(Mutex::new(None));
         let result_ref = Arc::clone(&result);
         self.connect_pending = Some(result);
         self.connecting = true;
@@ -995,7 +1013,7 @@ impl App {
             self.notify(ToastKind::Error, m);
             return;
         }
-        let finished: Option<Result<(Session, usize), String>> = self
+        let finished: Option<ConnectDone> = self
             .connect_pending
             .as_ref()
             .and_then(|p| p.lock().ok())
@@ -1006,7 +1024,9 @@ impl App {
             self.connect_pending = None;
             self.busy = None;
             match res {
-                Ok((session, step)) => {
+                Ok((session, step, health)) => {
+                    self.motd = health["motd"].as_str().unwrap_or("").to_string();
+                    self.node_time_utc = health["time_utc"].as_u64().unwrap_or(0);
                     // Persist the consumed step so the next process resumes
                     // here instead of replaying it.
                     self.otp_step = step + 1;
@@ -1056,8 +1076,101 @@ impl App {
         }
     }
 
+    /// Rotate the OTP anchor (OMPHALOS). The identity key signs the canonical
+    /// text, so a stolen bearer token alone cannot lock the real owner out.
+    /// Network work happens on a worker thread; `tick` applies the result.
+    pub fn begin_rotate_omphalos(&mut self) {
+        if self.rotating {
+            return;
+        }
+        let Some(token) = self.session_token() else {
+            self.status = self.strings.st_not_logged.to_string();
+            return;
+        };
+        let Some(id) = self.identity.clone() else {
+            self.status = self.strings.tr_no_identity.to_string();
+            return;
+        };
+        let c = match self.client() {
+            Ok(c) => c,
+            Err(e) => {
+                self.status = crate::i18n::fill1(self.strings.st_client_err, &format!("{e}"));
+                return;
+            }
+        };
+        let result: Pending<Result<OmphalosRotation, String>> = Arc::new(Mutex::new(None));
+        let result_ref = Arc::clone(&result);
+        self.rotation_pending = Some(result);
+        self.rotating = true;
+        self.busy = Some("rotate".into());
+        self.status = self.strings.rot_busy.to_string();
+        std::thread::spawn(move || {
+            let outcome = rotate_omphalos(&c, &token, &id).map_err(|e| e.to_string());
+            if let Ok(mut slot) = result_ref.lock() {
+                *slot = Some(outcome);
+            }
+        });
+    }
+
+    fn poll_rotate_omphalos(&mut self) {
+        if !self.rotating {
+            return;
+        }
+        let finished: Option<Result<OmphalosRotation, String>> = self
+            .rotation_pending
+            .as_ref()
+            .and_then(|p| p.lock().ok())
+            .and_then(|mut lock| lock.take());
+        let Some(res) = finished else { return };
+        self.rotating = false;
+        self.rotation_pending = None;
+        if self.busy.as_deref() == Some("rotate") {
+            self.busy = None;
+        }
+        match res {
+            Ok(rot) => {
+                // Persist the updated anchor *and* reset the local step before
+                // reporting success; otherwise the next GUI start would replay
+                // a step the node has already retired.
+                let home = self.home_path();
+                let pass = self.password.clone();
+                let krypte = home.join("krypte.hdap");
+                let pros = home.join("prosopeion.hdap");
+                let mut saved = Ok(());
+                if let Some(id) = self.identity.as_mut() {
+                    id.otp_k = rot.seed_iter as usize;
+                    id.otp_anchor = rot.otp_anchor;
+                    saved = identity_store::save(id, pass.as_bytes(), &krypte, &pros)
+                        .map_err(|e| format!("{e:?}"));
+                }
+                match saved {
+                    Ok(()) => {
+                        self.otp_step = 1;
+                        self.save_otp_step(0);
+                        let msg =
+                            crate::i18n::fill1(self.strings.rot_done, &rot.seed_iter.to_string());
+                        self.status = msg.clone();
+                        self.notify(ToastKind::Success, msg);
+                    }
+                    Err(e) => {
+                        let msg = crate::i18n::fill1(self.strings.rot_fail, &e);
+                        self.status = msg.clone();
+                        self.notify(ToastKind::Error, msg);
+                    }
+                }
+            }
+            Err(e) => {
+                let msg = crate::i18n::fill1(self.strings.rot_fail, &e);
+                self.status = msg.clone();
+                self.notify(ToastKind::Error, msg);
+            }
+        }
+    }
+
     pub fn disconnect(&mut self) {
         self.cancel_connect();
+        self.rotating = false;
+        self.rotation_pending = None;
         self.session = None;
         self.band = 0;
         self.cancel_band();
@@ -2957,7 +3070,7 @@ fn do_connect(
     uid: &str,
     step: usize,
     deadline: std::time::Instant,
-) -> Result<(Session, usize), String> {
+) -> Result<(Session, usize, serde_json::Value), String> {
     // `register` is idempotent (409 == already present) and consumes no
     // server-side one-shot state, so a single stalled connection is safe to
     // retry. `authenticate` is deliberately NOT retried: OTP steps are
@@ -3042,19 +3155,16 @@ fn do_connect(
              {MAX_STEP_PROBES} tentativas"
         ));
     };
-    let (server_id, tls_pin) = budgeted()
+    let health = budgeted()
         .get("/health", &Default::default())
         .ok()
         .and_then(|r| serde_json::from_slice::<serde_json::Value>(&r.body).ok())
-        .map(|v| {
-            (
-                v["server_id"].as_str().unwrap_or_default().to_string(),
-                v["tls_pin"].as_str().map(String::from),
-            )
-        })
         .unwrap_or_default();
+    let server_id = health["server_id"].as_str().unwrap_or_default().to_string();
+    let tls_pin = health["tls_pin"].as_str().map(String::from);
     // The step is returned so the caller can persist it: the next login must
-    // not replay it.
+    // not replay it. The health payload carries the rendered Ángelma and the
+    // node's Unix-UTC time; neither depends on the local timezone.
     Ok((
         Session {
             user_id: uid.to_string(),
@@ -3064,6 +3174,7 @@ fn do_connect(
             tls_pin,
         },
         step,
+        health,
     ))
 }
 
@@ -3090,9 +3201,9 @@ fn display_dir(cwd: &str) -> &str {
     }
 }
 
-/// Local wall-clock "HH:MM:SS" for the "last sync" freshness label. Wall
-/// clock, not the protocol `kairos`, because this is when *we* looked, not a
-/// signed event.
+/// "HH:MM:SS UTC" for the "last sync" freshness label. This is *our* local
+/// observation of the Unix-UTC clock — never the machine's timezone, and never
+/// a protocol `kairos` (that one is a signed event, not a wall clock).
 fn clock_str() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let secs = SystemTime::now()
@@ -3100,7 +3211,7 @@ fn clock_str() -> String {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     format!(
-        "{:02}:{:02}:{:02}",
+        "{:02}:{:02}:{:02} UTC",
         (secs / 3600) % 24,
         (secs / 60) % 60,
         secs % 60
@@ -3410,6 +3521,7 @@ mod tests {
             require_entry_pow: false,
             require_content_signature: false,
             max_body_bytes: 10 * 1024 * 1024,
+            motd: "HDAP Ángelma de teste · HDAP{[time_utc]}".into(),
             // The test drives many steps in a tight loop; the per-peer limiter
             // would otherwise reject the burst unrelated to what is asserted.
             rate_limit_per_sec: 0,
@@ -3463,7 +3575,8 @@ mod tests {
     /// `refresh()` runs on a worker thread.
     fn settle(app: &mut App) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while (app.listing || app.syncing || app.connecting) && std::time::Instant::now() < deadline
+        while (app.listing || app.syncing || app.connecting || app.rotating)
+            && std::time::Instant::now() < deadline
         {
             app.tick(0.0, f64::INFINITY);
             std::thread::sleep(std::time::Duration::from_millis(5));
@@ -5460,6 +5573,41 @@ mod tests {
         app.open_diadosi();
         assert_eq!(app.diadosi_fallbacks, "pyle-b");
         assert!(app.diadosi_status.contains('1'));
+    }
+
+    /// The GUI must display the rendered Ángelma/UTC from `/health`, stamp its
+    /// own freshness label in UTC, and rotate the OTP anchor with the identity
+    /// key (persisting the new chain locally).
+    #[test]
+    fn the_gui_shows_the_angelma_and_rotates_omphalos() {
+        let mut app = logged_in_app();
+        assert!(app.motd.contains("Ángelma"), "motd: {}", app.motd);
+        assert!(app.node_time_utc > 0, "the node must report Unix-UTC time");
+        assert!(clock_str().ends_with(" UTC"));
+
+        let old_k = app.identity.as_ref().unwrap().otp_k;
+        let old_anchor = app.identity.as_ref().unwrap().otp_anchor.clone();
+        app.begin_rotate_omphalos();
+        settle(&mut app);
+        assert!(!app.rotating, "rotation: {}", app.status);
+        let id = app.identity.as_ref().unwrap();
+        assert_eq!(id.otp_k, old_k + 1);
+        assert_ne!(id.otp_anchor, old_anchor);
+        assert_eq!(app.otp_step, 1);
+        assert_eq!(
+            std::fs::read_to_string(app.otp_step_file()).unwrap().trim(),
+            "1"
+        );
+
+        // The rotated vault on disk must match the in-memory identity, so the
+        // next GUI start authenticates with the new chain.
+        let (krypte, pros) = {
+            let home = app.home_path();
+            (home.join("krypte.hdap"), home.join("prosopeion.hdap"))
+        };
+        let reloaded = load_local(&app.password, &krypte, &pros).unwrap();
+        assert_eq!(reloaded.otp_k, id.otp_k);
+        assert_eq!(reloaded.otp_anchor, id.otp_anchor);
     }
 
     #[test]

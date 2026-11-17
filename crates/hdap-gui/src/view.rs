@@ -783,6 +783,13 @@ pub fn render(ui: &mut egui::Ui, app: &mut App) {
             {
                 app.begin_band(0);
             }
+            if ui
+                .button("🔑")
+                .on_hover_text(app.strings.rot_hover)
+                .clicked()
+            {
+                app.begin_rotate_omphalos();
+            }
             app.last_actions_rect = Some(ui.min_rect());
 
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
@@ -900,6 +907,11 @@ pub fn render(ui: &mut egui::Ui, app: &mut App) {
             }
             ui.label(RichText::new(&app.status).monospace());
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                if !app.motd.is_empty() {
+                    ui.label(RichText::new("Ángelma").small().weak())
+                        .on_hover_text(format!("{}\nUTC {}", app.motd, app.node_time_utc));
+                    ui.separator();
+                }
                 if app.session.is_some() {
                     ui.label(
                         RichText::new(fill1(app.strings.u_band_colon, &human_size(app.band)))
