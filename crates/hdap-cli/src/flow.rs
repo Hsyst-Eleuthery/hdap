@@ -12,10 +12,9 @@ use ed25519_dalek::Signer;
 use serde_json::{json, Value};
 
 use hdap_core::auth::{
-    derive_shared_key, make_otp_chain, prove_knowledge, prove_possession,
-    prove_session_secret_bound, Challenge,
+    derive_shared_key, prove_knowledge, prove_possession, prove_session_secret_bound, Challenge,
 };
-use hdap_core::crypto::{sha256, CryptoError};
+use hdap_core::crypto::CryptoError;
 use hdap_core::doc::{parse as parse_doc, ParseError, Signature};
 use hdap_core::identity::Identity;
 use hdap_core::pow::solve_pow_rand;
@@ -166,12 +165,10 @@ pub fn authenticate(
     use base64::Engine;
     let signature_b64 = base64::engine::general_purpose::STANDARD.encode(sig.to_bytes());
 
-    // Factor 2: OTP knowledge.
-    // v2/Teleios: the chain root is HKDF-derived from the identity seed, not
-    // the raw seed. The server verifies only against the registered anchor,
-    // and the client must rebuild the exact same preimages.
-    let seed = sha256(&identity.sign_key.to_bytes());
-    let (_, chain) = make_otp_chain(&seed, identity.otp_k);
+    // Factor 2: OTP knowledge. `Identity::otp_chain` picks the HKDF (v2) or
+    // raw-seed (v1) derivation that matches the registered anchor, so an
+    // account created before Teleios can still authenticate after an upgrade.
+    let chain = identity.otp_chain();
     let witness = prove_knowledge(&chain, otp_step)
         .ok_or_else(|| FlowError::Proto("otp step out of range".into()))?;
     let otp_proof_b64 = base64::engine::general_purpose::STANDARD.encode(&witness.proof);

@@ -1,7 +1,9 @@
 //! Global identity: a single `nickname_<sufixo>` per user, independent of
 //! any server, anchored in `prosopeion.hdap` (especificacao-hdap.md §3-§4).
 
-use crate::crypto::{ed25519_keygen, x25519_keygen, x25519_public, CryptoError, CryptoResult};
+use crate::crypto::{
+    ed25519_keygen, otp_chain, x25519_keygen, x25519_public, CryptoError, CryptoResult,
+};
 use crate::doc::{Doc, DocType};
 use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
 use rand_core::{OsRng, RngCore};
@@ -327,6 +329,26 @@ impl Identity {
     pub fn enc_pubkey(&self) -> [u8; 32] {
         x25519_public(&self.enc_secret)
     }
+
+    /// Rebuild the OTP chain that matches this identity's published anchor.
+    ///
+    /// v2/Teleios derives the chain root through HKDF; identities created by
+    /// v1 used the raw seed. Because the anchor is stored in the identity (and
+    /// published in `prosopeion.hdap`), the client can tell which derivation
+    /// the account was registered with and keep logging in after an upgrade.
+    /// Unknown anchors fall back to v2 so the failure stays explicit.
+    pub fn otp_chain(&self) -> Vec<[u8; 32]> {
+        let seed = sha256ed(&self.sign_key);
+        let (anchor_v2, chain_v2) = crate::auth::make_otp_chain(&seed, self.otp_k);
+        if anchor_v2.eq_ignore_ascii_case(&self.otp_anchor) {
+            return chain_v2;
+        }
+        let (anchor_v1, chain_v1) = otp_chain(&seed, self.otp_k);
+        if anchor_v1.eq_ignore_ascii_case(&self.otp_anchor) {
+            return chain_v1;
+        }
+        chain_v2
+    }
 }
 
 fn sha256ed(key: &SigningKey) -> [u8; 32] {
@@ -411,6 +433,25 @@ mod tests {
         .unwrap();
         assert_eq!(rebuilt.global_id(), gid);
         assert_eq!(rebuilt.otp_anchor, id.otp_anchor);
+    }
+
+    /// A v1 account (raw-seed anchor) must still be able to log in after the
+    /// server upgrades to Teleios: the client picks the derivation matching
+    /// the published anchor instead of blindly applying HKDF.
+    #[test]
+    fn a_legacy_v1_otp_anchor_still_rebuilds_a_verifiable_chain() {
+        let mut id = Identity::generate("jose", 1_700_000_000);
+        let (legacy_anchor, legacy_chain) = otp_chain(&sha256ed(&id.sign_key), id.otp_k);
+        id.otp_anchor = legacy_anchor;
+
+        let rebuilt = id.otp_chain();
+        assert_eq!(rebuilt, legacy_chain);
+        let witness = crate::auth::prove_knowledge(&rebuilt, 7).expect("witness");
+        assert!(crate::auth::verify_knowledge_bounded(
+            &id.otp_anchor,
+            &witness,
+            id.otp_k
+        ));
     }
 
     #[test]
