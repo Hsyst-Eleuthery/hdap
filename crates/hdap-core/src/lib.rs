@@ -20,9 +20,9 @@ pub const PROTOCOL_VERSION: u64 = 2;
 pub const PROTOCOL_CODENAME: &str = "Teleios";
 
 pub use auth::{
-    derive_shared_key, is_session_storage_key, prove_session_secret, prove_session_secret_bound,
-    session_storage_key, session_token, verify_knowledge_bounded, verify_possession, AuthProof,
-    Challenge, OtpWitness, SessionToken,
+    derive_shared_key, is_session_storage_key, omphalos_rotation_text, prove_session_secret,
+    prove_session_secret_bound, session_storage_key, session_token, verify_knowledge_bounded,
+    verify_possession, AuthProof, Challenge, OtpWitness, SessionToken,
 };
 pub use crypto::{
     hkdf_sha256, seal_to_pub, sha256, sha256_hex, KDF_INFO_ECIES, KDF_INFO_OTP, KDF_INFO_SESSION,

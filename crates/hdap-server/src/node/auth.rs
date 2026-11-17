@@ -29,14 +29,9 @@ fn pylaia_challenge(server_id: &str, nonce: &str) -> String {
 }
 
 /// Canonical text an identity key must sign to rotate its own OTP anchor.
-pub fn omphalos_rotation_text(
-    user_id: &str,
-    old_anchor: &str,
-    new_anchor: &str,
-    new_k: u64,
-) -> String {
-    format!("hdap:omphalos:v2:{user_id}:{old_anchor}:{new_anchor}:{new_k}")
-}
+/// The definition lives in `hdap-core` so the client signs exactly what the
+/// node verifies.
+pub use hdap_core::auth::omphalos_rotation_text;
 
 impl AuthModule {
     pub fn new(cfg: Config) -> Self {

@@ -67,6 +67,17 @@ pub fn verify_possession(
         .map_err(|_| CryptoError::VerificationFailed)
 }
 
+/// Canonical text an identity key must sign to rotate its own OTP anchor
+/// (`POST /omphalos`). Shared by client and server so the two can never drift.
+pub fn omphalos_rotation_text(
+    user_id: &str,
+    old_anchor: &str,
+    new_anchor: &str,
+    new_k: u64,
+) -> String {
+    format!("hdap:omphalos:v2:{user_id}:{old_anchor}:{new_anchor}:{new_k}")
+}
+
 /// Generate an OTP chain of `k` steps from the identity seed. The seed is
 /// first passed through HKDF-SHA256 with the OTP domain label so the chain
 /// root is never a raw identity/secret byte string.

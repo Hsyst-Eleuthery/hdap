@@ -338,16 +338,37 @@ impl Identity {
     /// the account was registered with and keep logging in after an upgrade.
     /// Unknown anchors fall back to v2 so the failure stays explicit.
     pub fn otp_chain(&self) -> Vec<[u8; 32]> {
+        self.otp_chain_for(self.otp_k)
+    }
+
+    fn uses_legacy_otp(&self) -> bool {
         let seed = sha256ed(&self.sign_key);
-        let (anchor_v2, chain_v2) = crate::auth::make_otp_chain(&seed, self.otp_k);
-        if anchor_v2.eq_ignore_ascii_case(&self.otp_anchor) {
-            return chain_v2;
+        let v2 = crate::auth::make_otp_chain(&seed, self.otp_k).0;
+        if v2.eq_ignore_ascii_case(&self.otp_anchor) {
+            return false;
         }
-        let (anchor_v1, chain_v1) = otp_chain(&seed, self.otp_k);
-        if anchor_v1.eq_ignore_ascii_case(&self.otp_anchor) {
-            return chain_v1;
+        otp_chain(&seed, self.otp_k)
+            .0
+            .eq_ignore_ascii_case(&self.otp_anchor)
+    }
+
+    /// Build the chain for a (possibly larger) `k`, using the same derivation
+    /// the account was registered with. Needed for OMPHALOS rotation.
+    pub fn otp_chain_for(&self, k: usize) -> Vec<[u8; 32]> {
+        let seed = sha256ed(&self.sign_key);
+        if self.uses_legacy_otp() {
+            otp_chain(&seed, k).1
+        } else {
+            crate::auth::make_otp_chain(&seed, k).1
         }
-        chain_v2
+    }
+
+    /// Published anchor for a rotated chain length.
+    pub fn otp_anchor_for(&self, k: usize) -> String {
+        self.otp_chain_for(k)
+            .last()
+            .map(hex::encode)
+            .unwrap_or_default()
     }
 }
 
