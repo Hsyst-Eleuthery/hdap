@@ -1,5 +1,7 @@
 # Guia do Usuário — HDAP
 
+*Revisão de 2026-11-17.*
+
 **HDAP v2.0 — codinome de protocolo: Teleios (Téleia vási) · codinome de lançamento: Teleios**
 
 **Escrito por Thaís (op3n/op3ny)**
@@ -91,13 +93,9 @@ O [resumo da geração v2](VERSAO.md) explica cada mudança em detalhe e mantém
 
 ## Codenomes e versionamento
 
-Todo lançamento do HDAP carrega **dois codinomes**. O **codinome de protocolo** dá nome a uma geração da linguagem do protocolo: é ele que muda quando a forma como os nós conversam ou como os documentos são interpretados muda. O **codinome de lançamento** dá nome ao pacote como um todo: é ele que muda em qualquer release, inclusive nas correções que não tocam o protocolo.
+Todo lançamento carrega um **codinome de protocolo** (a geração da linguagem entre nós) e um **codinome de lançamento** (o pacote). A geração atual é **v2.0 — Téleia vási · Teleios**; a v1.0 foi **Themelio · Veritas Aeterna** e a v1.001, **Themelio · Epoptia**. Correções que não mudam a linguagem saem como `v2.001`, `v2.002` e assim por diante, mantendo **Teleios**; o formato `# VERSION: 1` é independente da geração, e documentos v1 são lidos sem conversão.
 
-O marco inicial é o **HDAP v1.0**. O codinome de protocolo é **Themelio**, que significa "Marco Zero" em grego, e o codinome de lançamento é **Veritas Aeterna**, "verdade eterna". A v1.001 manteve **Themelio** e trouxe **Epoptia**, corrigindo a edição e a avaliação das permissões. A geração atual é a **v2.0 — Téleia vási · Teleios**: um novo codinome de protocolo porque a linguagem entre nós mudou, e **Teleios** também como codinome de lançamento.
-
-As regras de versionamento são simples e valem para sempre. Atualizações que **não** mudam o protocolo — melhorias de interface, correções de bug, correções de segurança, mudanças de documentação ou de empacotamento — saem como `v2.001`, `v2.002`, `v2.003`, e assim por diante. Nesses lançamentos, **apenas o codinome de lançamento muda**; o codinome de protocolo continua **Teleios**. Já as atualizações que mudam a linguagem do protocolo abrem a próxima versão maior e trocam os dois codinomes. O formato dos documentos é independente dessa contagem: `# VERSION: 1` continua valendo na v2, e um `.hdap` da v1 é lido sem conversão.
-
-Há ainda uma regra que não admite exceção: **toda release atualiza a documentação**. Não existe lançamento sem changelog, sem os dois codinomes declarados e sem as datas de revisão ajustadas. O registro completo de cada lançamento fica no [CHANGELOG](../CHANGELOG.md), o resumo desta geração em [VERSAO.md](VERSAO.md), e o procedimento de publicação está no [guia de execução](guia-de-execucao.md).
+A política completa — regras de bump, tabela de codinomes e histórico — está em [VERSAO.md](VERSAO.md). Toda release atualiza a documentação e as datas de revisão; o registro ponto a ponto está no [CHANGELOG](../CHANGELOG.md) e a publicação no [guia de execução](guia-de-execucao.md).
 
 ---
 
@@ -107,7 +105,7 @@ O guia foi dividido em capítulos que podem ser lidos em ordem ou consultados se
 
 Comece pelo [resumo da geração v2](VERSAO.md) se quiser um mapa do que mudou. Se o seu objetivo é entender o protocolo em profundidade, o [manual técnico](tecnico.md) e a [especificação](especificacao-hdap.md) são o caminho seguinte. Se o seu objetivo é auditar a segurança, o [modelo de ameaça](modelo-de-ameaca.md) lista cada ameaça e a mitigação correspondente. E se o seu objetivo é construir o HDAP a partir do código, o [guia de execução](guia-de-execucao.md) cobre compilação, testes e empacotamento.
 
-Se você quer apenas o resumo básico, este capítulo basta. Se quer entender a identidade e a casa, siga para o [segundo capítulo](userguide2.md); se quer entender arquivos, documentos e permissões, o [terceiro](userguide3.md); se quer entender banda, economia e reputação, o [quarto](userguide4.md); se quer entender a rede, as réplicas e a sucessão, o [quinto](userguide5.md); e se quer usar a GUI, o CLI e operar um pyle, o [sexto](userguide6.md). Para compilar o código e empacotar releases, o caminho é o [guia de execução](guia-de-execucao.md); para a arquitetura e as decisões de engenharia, o [manual técnico](tecnico.md); para implementar outro cliente, a [especificação](especificacao-hdap.md) e o [RFC](rfc-hdap.md); e para a auditoria de segurança, o [modelo de ameaça](modelo-de-ameaca.md).
+Se você quer apenas o resumo básico, este capítulo basta. Se quer entender a identidade e a casa, siga para o [segundo capítulo](guia-2-identidade.md); se quer entender arquivos, documentos e permissões, o [terceiro](guia-3-arquivos.md); se quer entender banda, economia e reputação, o [quarto](guia-4-banda.md); se quer entender a rede, as réplicas e a sucessão, o [quinto](guia-5-federacao.md); e se quer usar a GUI, o CLI e operar um pyle, o [sexto](guia-6-operacao.md). Para compilar o código e empacotar releases, o caminho é o [guia de execução](guia-de-execucao.md); para a arquitetura e as decisões de engenharia, o [manual técnico](tecnico.md); para implementar outro cliente, a [especificação](especificacao-hdap.md) e o [RFC](rfc-hdap.md); e para a auditoria de segurança, o [modelo de ameaça](modelo-de-ameaca.md).
 
 ---
 

@@ -1,12 +1,14 @@
 # Guia de Execução — Compilar, Testar e Empacotar o HDAP
 
+*Revisão de 2026-11-17.*
+
 **HDAP v2.0 — Téleia vási · Teleios**
 
 **Escrito por Thaís (op3n/op3ny)**
 
 ---
 
-Este guia é para quem vai **construir** o HDAP a partir do código: compilar, rodar os testes, gerar binários e empacotar uma release. Para aprender a **usar** os programas, veja o [guia do usuário](userguide.md).
+Este guia é para quem vai **construir** o HDAP a partir do código: compilar, rodar os testes, gerar binários e empacotar uma release. Para aprender a **usar** os programas, veja o [guia do usuário](guia-1-introducao.md).
 
 ---
 
@@ -250,18 +252,50 @@ O workflow `.github/workflows/ci.yml` roda, a cada push ou pull request:
 
 | Job | O que faz |
 |---|---|
-| Check + Test | `fmt`, `clippy -D warnings`, build e testes na toolchain estável. |
-| Fuzzing | Alvos de fuzzing na nightly (sempre em push; em PR, com a label `fuzz`). |
-| Security Audit | `cargo audit` sobre o `Cargo.lock`. |
+| Check + Test | `fmt`, `clippy -D warnings`, build e testes na toolchain estável, em **Linux, Windows e macOS**. |
+| Fuzzing | Cinco alvos na nightly: documento `.hdap`, request HTTP, `adeia`/permissões, URI de acesso e cofre `krypte.hdap`. |
+| Security Audit | `cargo audit` sobre o `Cargo.lock` e `cargo outdated` como aviso (não bloqueia). |
 | MSRV | Build com Rust 1.95 para garantir o piso declarado. |
+| Release | Em tags `v*`, compila os três alvos publicados e anexa os pacotes + SHA-256 à GitHub Release. |
 
-Antes de abrir um pull request, rode localmente os mesmos comandos da seção [Rodar os testes](#rodar-os-testes).
+O workflow roda em `main`, `v2-teleia` e em todo pull request para esses branches. Antes de abrir um pull request, rode localmente os mesmos comandos da seção [Rodar os testes](#rodar-os-testes).
+
+---
+
+## Implantação
+
+### systemd
+
+Um exemplo pronto está em [`docs/hdap-server.service`](hdap-server.service). Copie para `/etc/systemd/system/`, ajuste `--advertise` para o endereço público, crie o usuário `hdap` e habilite:
+
+```bash
+sudo install -m 0644 docs/hdap-server.service /etc/systemd/system/hdap-server.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now hdap-server
+journalctl -u hdap-server -f
+```
+
+O `tls_pin` é impresso no boot e também está em `GET /health`. A unidade usa `ProtectSystem=strict` com `ReadWritePaths=/var/lib/hdap` e mantém a chave mestra em `/var/lib/hdap/master.key`.
+
+### Docker
+
+O [`Dockerfile`](../Dockerfile) compila em estágio multiplo e executa como usuário não-root:
+
+```bash
+docker build -t hdap-node:2.0.0 .
+docker run -d --name hdap-node -p 8443:8443 \
+  -v hdap-data:/var/lib/hdap \
+  -e HDAP_ADVERTISE=meu-pyle.example.org:8443 \
+  hdap-node:2.0.0
+```
+
+Variáveis aceitas pelo entrypoint: `HDAP_LISTEN`, `HDAP_DATA`, `HDAP_ADVERTISE`, `HDAP_MASTER_KEY_FILE`, `HDAP_MOTD`, `HDAP_MAX_CONNECTIONS`, `HDAP_RATE_LIMIT` e `HDAP_NO_TLS` (somente para desenvolvimento em loopback). O volume precisa ser incluído no backup: identidade TLS, chave mestra e banco viajam juntos.
 
 ---
 
 ## Checklist de lançamento
 
-Toda release do HDAP segue a política de **dois codinomes** descrita no [guia do usuário](userguide.md#codenomes-e-versionamento) e no [CHANGELOG](../CHANGELOG.md). O procedimento:
+Toda release do HDAP segue a política de **dois codinomes** descrita no [guia do usuário](guia-1-introducao.md#codenomes-e-versionamento) e no [CHANGELOG](../CHANGELOG.md). O procedimento:
 
 1. **Defina a versão.** Correções de interface, bugs e vulnerabilidades sobem um passo de patch (`v2.001`, `v2.002`, …) e mudam **apenas o codinome de lançamento**, mantendo o protocolo **Teleios**. Mudanças na linguagem do protocolo abrem a próxima versão maior e mudam **os dois codinomes**. O `FORMAT_VERSION` dos documentos só muda com um migrador explícito.
 2. **Atualize a versão** em `Cargo.toml` (workspace) e deixe o `Cargo.lock` acompanhar.

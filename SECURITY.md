@@ -10,7 +10,13 @@ Se você encontrou uma vulnerabilidade, **não abra uma issue pública**. Envie 
 - GitHub: [@op3ny](https://github.com/op3ny) (mensagem privada)
 - Discord: `@op3n`
 
-Para relatos sensíveis, cifre a mensagem com a chave OpenPGP pública da mantenedora. A chave pode ser obtida no servidor `https://keys.thais.fyi` (`thais@hsyst.org`, chave também em `thais@xmpp`, `thais@discord`) e a assinatura pode ser conferida em `https://thais.fyi`.
+Para relatos sensíveis, cifre a mensagem com a chave OpenPGP pública da mantenedora:
+
+- **Identidade:** Thaís <thais@hsyst.org>
+- **Fingerprint:** `1489 36AB E859 A3A9 0ED1 E17A 5FF5 3F39 FFC4 D03F`
+- **Download:** `https://keys.thais.fyi/pks/lookup?op=get&search=thais%40hsyst.org`
+
+Confira o fingerprint acima antes de usar a chave. Os canais de contato são apenas os três listados no início desta seção (e-mail `thais@hsyst.org`, GitHub `@op3ny` e Discord `@op3n`); mensagens em XMPP não são monitoradas para relatórios de segurança.
 
 Inclua, quando possível:
 

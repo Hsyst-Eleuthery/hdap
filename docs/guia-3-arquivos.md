@@ -1,13 +1,15 @@
 # Arquivos, Documentos e Permissões
 
+*Revisão de 2026-11-17.*
+
 **HDAP v2.0 — Téleia vási · Teleios**
 
 **Escrito por Thaís (op3n/op3ny)**
 
 ---
 
-**Leia primeiro:** [userguide2.md](userguide2.md) (Identidade e a Casa)
-**Próximo:** [userguide4.md](userguide4.md) (Banda, Economia e Reputação)
+**Leia primeiro:** [guia-2-identidade.md](guia-2-identidade.md) (Identidade e a Casa)
+**Próximo:** [guia-4-banda.md](guia-4-banda.md) (Banda, Economia e Reputação)
 
 ---
 
@@ -39,7 +41,7 @@ Quando você vê uma URI com `?hash=...`, aquele hash não é decoração. Ele p
 
 Ao subir um arquivo, o cliente assina os bytes crus com a chave Ed25519 da identidade. O pyle verifica a assinatura contra o `prosopeion.hdap` do dono antes de gravar. Se a assinatura não conferir, o upload é recusado. Não há "modo de confiança" nem exceção para conteúdo antigo: a assinatura é o que separa um arquivo de um monte de bytes.
 
-Repare na separação de papéis, porque ela explica muitas decisões do protocolo. A assinatura prova autoria e integridade. O hash dá o endereço. A permissão, a `adeia`, decide quem pode ler. Nenhuma dessas três coisas depende da outra. Você pode ter o hash de um arquivo e não ter permissão para lê-lo; pode ter permissão e ainda assim o hash servir para detectar que o conteúdo foi trocado no caminho; pode ter a assinatura e não ter a posse, porque a posse é transferível separadamente.
+Repare na separação de papéis, porque ela explica muitas decisões do protocolo. A assinatura prova posse da chave sobre os bytes e integridade — **não** que a pessoa criou o conteúdo; alguém pode copiar um arquivo público e assiná-lo, e o registro marca quem enviou primeiro (`origin_user`), separado do dono do namespace (`namespace_owner`). O hash dá o endereço. A permissão, a `adeia`, decide quem pode ler. Nenhuma dessas três coisas depende da outra. Você pode ter o hash de um arquivo e não ter permissão para lê-lo; pode ter permissão e ainda assim o hash servir para detectar que o conteúdo foi trocado no caminho; pode ter a assinatura e não ter a posse, porque a posse é transferível separadamente.
 
 Há uma sutileza na assinatura de documentos que vale conhecer, mesmo que você nunca escreva um parser. A assinatura de um signatário é calculada sobre o texto antes de sua própria linha de assinatura ser inserida. Isso permite que um mesmo documento acumule assinaturas de várias partes sem invalidar as anteriores, como acontece em uma transferência de posse. O documento final contém todas as assinaturas, mas cada uma foi produzida sobre uma versão ligeiramente diferente do texto, de forma determinística e reproduzível.
 
@@ -188,4 +190,4 @@ O caminho de leitura é o espelho disso. O cliente pede o arquivo, o pyle verifi
 
 ---
 
-**Leia agora:** [userguide4.md](userguide4.md) — Banda, Economia e Reputação
+**Leia agora:** [guia-4-banda.md](guia-4-banda.md) — Banda, Economia e Reputação

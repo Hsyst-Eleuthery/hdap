@@ -337,10 +337,16 @@ impl Db {
         // Prime the blob marks from what is already on disk so the first
         // flush after a restart does not rewrite every stored byte.
         {
-            let conn = db.conn.lock().unwrap();
+            let conn = db
+                .conn
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             let mut stmt = conn.prepare("SELECT k, hash, len FROM blobs")?;
             let mut rows = stmt.query([])?;
-            let mut marks = db.blob_marks.lock().unwrap();
+            let mut marks = db
+                .blob_marks
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             while let Some(row) = rows.next()? {
                 let k: String = row.get(0)?;
                 let h: String = row.get(1)?;
@@ -418,7 +424,10 @@ impl Db {
     /// A brand-new node gets `fresh_master_key` so the caller can generate a
     /// key that will be written on the first flush.
     pub fn load(&self) -> DbResult<Option<State>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let raw: Option<Vec<u8>> = conn
             .query_row("SELECT v FROM meta WHERE k = 'state'", [], |r| r.get(0))
             .optional()?;
@@ -472,11 +481,17 @@ impl Db {
 
         // Decide the work *before* taking the write lock, so a read-only
         // request that changed nothing never blocks the writer.
-        let mut marks = self.marks.lock().unwrap();
+        let mut marks = self
+            .marks
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if marks.get("state") == Some(&meta_mark) {
             return Ok(());
         }
-        let mut blob_marks = self.blob_marks.lock().unwrap();
+        let mut blob_marks = self
+            .blob_marks
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut blob_writes: Vec<(&String, &crate::store::Blob)> = Vec::new();
         for (k, b) in &st.objects {
             let want = (b.hash.clone(), b.bytes.len() as u64);
@@ -489,7 +504,10 @@ impl Db {
             .filter(|k| !st.objects.contains_key(*k))
             .collect();
 
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let tx = conn.transaction()?;
 
         for (k, b) in &blob_writes {
@@ -529,7 +547,10 @@ impl Db {
 
     /// Bytes on disk (blobs + metadata), for `/health` and for tests.
     pub fn size_bytes(&self) -> DbResult<u64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let total: i64 = conn.query_row(
             "SELECT COALESCE((SELECT SUM(len) FROM blobs), 0)
                   + COALESCE((SELECT SUM(LENGTH(v)) FROM meta), 0)",
@@ -541,14 +562,20 @@ impl Db {
 
     /// Number of content rows, for tests that assert on durability.
     pub fn blob_count(&self) -> DbResult<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         Ok(conn.query_row("SELECT COUNT(*) FROM blobs", [], |r| r.get(0))?)
     }
 
     /// Force a WAL checkpoint so everything is in the main database file.
     /// Useful before a clean shutdown or when copying the node directory.
     pub fn checkpoint(&self) -> DbResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
         Ok(())
     }
@@ -572,6 +599,7 @@ mod tests {
             otp_anchor_hex: "cc".repeat(32),
             otp_k: 1024,
             created_at: 1_700_000_000,
+            v2_f3: true,
             home_pyle: "node-a".into(),
         }
     }
@@ -893,7 +921,10 @@ mod tests {
                 transfers: BTreeMap::new(),
             };
             let raw = serde_json::to_vec(&meta).unwrap();
-            let conn = db.conn.lock().unwrap();
+            let conn = db
+                .conn
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             conn.execute("INSERT INTO meta (k, v) VALUES ('state', ?1)", params![raw])
                 .expect("seed");
         }
@@ -944,7 +975,10 @@ mod tests {
         });
         {
             let db = Db::open(&path).expect("open");
-            let conn = db.conn.lock().unwrap();
+            let conn = db
+                .conn
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             conn.execute(
                 "INSERT INTO meta (k, v) VALUES ('state', ?1)",
                 params![serde_json::to_vec(&older).unwrap()],
@@ -1016,7 +1050,10 @@ mod tests {
                 let mut st = State::default();
                 populated(&mut st);
                 db.flush(&st).expect("flush");
-                let conn = db.conn.lock().unwrap();
+                let conn = db
+                    .conn
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
                 conn.execute(sql, []).expect("tamper");
             }
             let db = Db::open(&path).expect("reopen");
@@ -1086,7 +1123,10 @@ mod tests {
             meta.as_object_mut()
                 .unwrap()
                 .insert("band_windows".into(), serde_json::json!({}));
-            let conn = db.conn.lock().unwrap();
+            let conn = db
+                .conn
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             conn.execute(
                 "INSERT INTO meta (k, v) VALUES ('state', ?1)",
                 params![serde_json::to_vec(&meta).unwrap()],

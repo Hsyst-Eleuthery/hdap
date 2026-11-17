@@ -7,7 +7,7 @@ use crate::crypto::{
 };
 use ed25519_dalek::{Signature, SigningKey};
 use x25519_dalek::StaticSecret;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 /// Challenge issued by a server for factor 1 (possession). Nonce + timestamp,
 /// one-time use.
@@ -83,7 +83,7 @@ pub fn omphalos_rotation_text(
 /// root is never a raw identity/secret byte string.
 pub fn make_otp_chain(seed: &[u8; 32], k: usize) -> (String, Vec<[u8; 32]>) {
     assert!(k > 0 && k <= MAX_OTP_CHAIN_LEN, "invalid OTP chain length");
-    let root = hkdf_sha256(seed, &[], KDF_INFO_OTP);
+    let root = Zeroizing::new(hkdf_sha256(seed, &[], KDF_INFO_OTP));
     otp_chain(&root, k)
 }
 
@@ -170,9 +170,12 @@ pub fn is_session_storage_key(key: &str) -> bool {
 /// The node derives it from its own ENC secret key and the user's published
 /// ENC public key; the user derives it from its ENC secret key and the
 /// node's published ENC public key. Same `k`, no stored secret.
-pub fn derive_shared_key(local_enc_priv: &StaticSecret, peer_enc_pub: &[u8; 32]) -> [u8; 32] {
-    let mut shared = x25519_shared(local_enc_priv, peer_enc_pub);
-    let key = hkdf_sha256(&shared, &[], KDF_INFO_SESSION);
+pub fn derive_shared_key(
+    local_enc_priv: &StaticSecret,
+    peer_enc_pub: &[u8; 32],
+) -> Zeroizing<[u8; 32]> {
+    let mut shared = Zeroizing::new(x25519_shared(local_enc_priv, peer_enc_pub));
+    let key = Zeroizing::new(hkdf_sha256(&shared[..], &[], KDF_INFO_SESSION));
     shared.zeroize();
     key
 }
@@ -255,8 +258,14 @@ mod tests {
         assert_ne!(from_user, from_other);
 
         // The proof binds user, node and ts.
-        let p = prove_session_secret(&from_user, "jose_x", "node-a", 123);
-        assert_eq!(p, prove_session_secret(&from_node, "jose_x", "node-a", 123));
-        assert_ne!(p, prove_session_secret(&from_user, "jose_x", "node-a", 124));
+        let p = prove_session_secret(&from_user[..], "jose_x", "node-a", 123);
+        assert_eq!(
+            p,
+            prove_session_secret(&from_node[..], "jose_x", "node-a", 123)
+        );
+        assert_ne!(
+            p,
+            prove_session_secret(&from_user[..], "jose_x", "node-a", 124)
+        );
     }
 }

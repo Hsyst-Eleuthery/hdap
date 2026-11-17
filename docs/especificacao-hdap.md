@@ -272,6 +272,7 @@ BITS(claim) = clamp(ceil(log2(claim_hps × target_secs)), min_bits, max_bits)
 2. Servidor valida: hash==conteúdo, assinatura confere **contra a pubkey da sessão autenticada** (nunca contra campos do corpo), permissões de escrita, mochthos/choregia (syngraphe). Sem `X-HDAP-Sphragis` válido → `401` (salvo `require_content_signature=false`).
 3. Persiste **cifrado em repouso** (`aead_seal(master_key)`) e registra no `prytaneion` de **origem**, com `origin_user` = usuário autenticado/autor, `origin_user_pubkey` e `sphragis` da assinatura recebida, e `namespace_owner` = dono do namespace alvo. O commit é **síncrono antes da resposta**; falha → `500`.
 4. **Contagem por delta (v2):** reenviar bytes idênticos ao blob existente é idempotente — não cobra banda nem aumenta `st.stored`/`moira`. A cota e a banda só são debitadas pelo delta real de armazenamento.
+5. **Alcance da autoria (v2):** a `sphragis` prova que a chave da sessão assinou os bytes, não que o signatário os criou. Copiar um arquivo público e assiná-lo é possível. `origin_user` registra **quem assinou e enviou primeiro** para aquele hash (regra *first writer wins*); `namespace_owner` registra o dono do espaço alvo. São campos independentes e o segundo pode mudar por `metabibasis` sem reescrever o primeiro.
 
 ### 10.2 Matriz (`prytaneion.hdap`)
 - Por conteúdo (chave = hash): `ORIGIN_PYLE`, `ORIGIN_PROSPEION`, `REPLICAS [{pyle,path}]`, `LETHES` (histórico), `PHEME_UPDATES`.

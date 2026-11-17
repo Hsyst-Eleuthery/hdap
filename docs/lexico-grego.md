@@ -120,5 +120,5 @@
 | v1.001 | Themelio | Epoptia | `VERSION: 1` |
 | **v2.0** | **Teleios** (Téleia vási) | **Teleios** | **`VERSION: 1` (inalterado)** |
 
-O codinome de protocolo muda quando a linguagem de interoperabilidade muda; o de lançamento muda em qualquer release. Correções dentro da Teleios saem como `v2.001`, `v2.002` e assim por diante, com novo codinome de lançamento e o mesmo protocolo. A passagem de Themelio para Teleios alterou provas, tempo, cofre e repouso de segredos — mas **não** o formato textual dos documentos. O resumo completo está em [VERSAO.md](VERSAO.md).
+A passagem de Themelio para Teleios alterou provas, tempo, cofre e repouso de segredos — mas **não** o formato textual dos documentos. As regras de codinomes e versões estão em [VERSAO.md](VERSAO.md).
 

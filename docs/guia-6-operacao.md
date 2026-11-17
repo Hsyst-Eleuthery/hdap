@@ -1,12 +1,14 @@
 # Aplicativos e Operação
 
+*Revisão de 2026-11-17.*
+
 **HDAP v2.0 — Téleia vási · Teleios**
 
 **Escrito por Thaís (op3n/op3ny)**
 
 ---
 
-**Leia primeiro:** [userguide5.md](userguide5.md) (Federação, Réplicas e Sucessão)
+**Leia primeiro:** [guia-5-federacao.md](guia-5-federacao.md) (Federação, Réplicas e Sucessão)
 **Guia prático:** [guia-de-execucao.md](guia-de-execucao.md)
 
 ---
@@ -134,9 +136,7 @@ Quando `--motd` e `--motd-file` aparecem juntos, **o último vence** — os dois
 
 ## Atualizações e compatibilidade
 
-O HDAP segue uma política de versionamento explícita. A v1.0 foi o marco zero, com **Themelio · Veritas Aeterna**; a v1.001 manteve Themelio com **Epoptia**. A geração atual é a **v2.0 — Téleia vási · Teleios**, com codinome de protocolo e de lançamento **Teleios**. Correções, melhorias de interface, segurança, documentação e empacotamento geram `v2.001`, `v2.002` e assim por diante, alterando apenas o codinome de lançamento. Mudanças na linguagem do protocolo abrem a próxima versão maior e trocam os dois codinomes.
-
-Essa política existe para que você saiba o que esperar. Uma versão `2.0xx` não quebra a linguagem do protocolo; ela corrige e melhora. O formato dos documentos é independente: `# VERSION: 1` continua valendo, e cofres e documentos v1 são lidos sem conversão. Toda release atualiza a documentação, declara os dois codinomes na primeira página e ajusta as datas de revisão. O resumo desta geração está em [VERSAO.md](VERSAO.md).
+A geração atual é **v2.0 — Téleia vási · Teleios**. Uma versão `v2.00x` corrige e melhora sem mudar a linguagem do protocolo; o formato `# VERSION: 1` continua valendo, e cofres e documentos v1 são lidos sem conversão. A política completa de codinomes, as regras de bump e o histórico estão em [VERSAO.md](VERSAO.md); cada release atualiza a documentação e as datas de revisão.
 
 Para o usuário, a recomendação é simples: mantenha o cliente e o pyle na mesma versão maior, leia as notas de release antes de atualizar e faça backup do cofre antes de qualquer mudança. A compatibilidade é um compromisso, mas o backup é a rede de segurança que nenhum compromisso substitui.
 

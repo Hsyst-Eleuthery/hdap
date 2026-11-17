@@ -915,6 +915,7 @@ impl MirrorModule {
                 otp_anchor_hex: remote.user.otp_anchor_hex.clone(),
                 otp_k: remote.user.otp_k,
                 created_at: remote.user.created_at,
+                v2_f3: true,
                 home_pyle: home_pyle.clone(),
             });
         if let Some(user) = st.users.get_mut(&remote.owner) {
@@ -1124,6 +1125,7 @@ mod tests {
                     otp_anchor_hex: "cc".repeat(32),
                     otp_k: 1024,
                     created_at: 1_700_000_000,
+                    v2_f3: true,
                     home_pyle: node.cfg.server_id.clone(),
                 },
             );
@@ -1365,6 +1367,7 @@ mod tests {
                         otp_anchor_hex: "cc".repeat(32),
                         otp_k: 1024,
                         created_at: 1_700_000_000,
+                        v2_f3: true,
                         home_pyle: "pyle-b".into(),
                     },
                 );

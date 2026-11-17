@@ -1,0 +1,40 @@
+# Exemplo de unidade systemd para um pyle HDAP (v2 / Teleios).
+#
+# Instalação:
+#   sudo install -m 0644 docs/hdap-server.service /etc/systemd/system/hdap-server.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now hdap-server
+#   journalctl -u hdap-server -f        # o tls_pin aparece aqui no boot
+#
+# Ajuste --advertise para o endereço público real: o server_id é derivado dele.
+[Unit]
+Description=HDAP node (Téleia vási / Teleios)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hdap
+Group=hdap
+Environment=HDAP_LOG=warn
+ExecStart=/usr/local/bin/hdap-server \
+  --listen 0.0.0.0:8443 \
+  --advertise pyle.example.org:8443 \
+  --data /var/lib/hdap \
+  --master-key-file /var/lib/hdap/master.key \
+  --motd 'HDAP Ángelma · uptime HDAP{[uptime]} · usuários HDAP{[users]}' \
+  --max-connections 256 \
+  --cleanup-interval 60 \
+  --time-tolerance 300 \
+  --rate-limit 60
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/hdap
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

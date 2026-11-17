@@ -17,12 +17,35 @@ mkdir -p "$DATA_DIR" "$GUI_HOME" "$LOG_DIR"
 
 SERVER_LOG="$LOG_DIR/server.log"
 GUI_LOG="$LOG_DIR/gui.log"
+RUN_DIR="$DEV_DIR/run"
+mkdir -p "$RUN_DIR"
+SERVER_PIDFILE="$RUN_DIR/server.pid"
+GUI_PIDFILE="$RUN_DIR/gui.pid"
+
+# Só encerra processos que este script iniciou. `pkill -f hdap-gui` também
+# matava janelas de outros projetos na mesma máquina.
+owned_pid() {
+  local pid="$1" marker="$2" cmd
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  cmd=$(ps -p "$pid" -o command= 2>/dev/null || true)
+  [[ -n "$cmd" && "$cmd" == *"$marker"* ]]
+}
+
+stop_previous() {
+  local pidfile="$1" marker="$2" pid
+  [[ -f "$pidfile" ]] || return 0
+  pid=$(tr -d '[:space:]' < "$pidfile" 2>/dev/null || true)
+  if owned_pid "$pid" "$marker"; then
+    kill "$pid" 2>/dev/null || true
+  fi
+  rm -f "$pidfile"
+}
 
 echo "[run] compilando release (incremental) ..."
 cargo build --release -p hdap-server -p hdap-gui
 
-pkill -f "hdap-server.*8443" 2>/dev/null || true
-pkill -f "hdap-gui" 2>/dev/null || true
+stop_previous "$SERVER_PIDFILE" "$ROOT/target/release/hdap-server"
+stop_previous "$GUI_PIDFILE" "$ROOT/target/release/hdap-gui"
 sleep 0.3
 
 echo "[run] iniciando nó em 127.0.0.1:8443 (TLS, pin via TOFU) ..."
@@ -35,6 +58,7 @@ setsid ./target/release/hdap-server \
   --choregia 1048576 \
   >"$SERVER_LOG" 2>&1 &
 SRV_PID=$!
+echo "$SRV_PID" > "$SERVER_PIDFILE"
 
 # Espera o pin aparecer no log (o TLS é gerado no boot).
 PIN=""
@@ -55,6 +79,7 @@ echo "[run] iniciando GUI ..."
 # the nickname is still appended, so `maria` and `jose` stay separate vaults.
 HDAP_HOME="$GUI_HOME" setsid ./target/release/hdap-gui >"$GUI_LOG" 2>&1 &
 GUI_PID=$!
+echo "$GUI_PID" > "$GUI_PIDFILE"
 echo "[run] PID da GUI: $GUI_PID"
 
 cat <<UI
@@ -75,5 +100,10 @@ Logs: nó=$SERVER_LOG  GUI=$GUI_LOG
 Ctrl+C para parar os dois.
 UI
 
-trap 'kill $SRV_PID $GUI_PID 2>/dev/null || true; echo; echo "[run] parado"' EXIT
+cleanup() {
+  kill "$SRV_PID" "$GUI_PID" 2>/dev/null || true
+  rm -f "$SERVER_PIDFILE" "$GUI_PIDFILE"
+  echo; echo "[run] parado"
+}
+trap cleanup EXIT
 wait

@@ -311,6 +311,7 @@ mod tests {
                     otp_anchor_hex: "cc".repeat(32),
                     otp_k: 1024,
                     created_at: 1_700_000_000,
+                    v2_f3: true,
                     home_pyle: "pyle-p".into(),
                 },
             );

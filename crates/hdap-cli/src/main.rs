@@ -249,6 +249,11 @@ fn cmd_init(args: &CmdArgs, tail: &[String]) {
         "identity {} created; registered on a node with `register`",
         identity.global_id()
     );
+    eprintln!(
+        "hdap-cli: BACK UP NOW — copy `{}` to a second physical location and store the passphrase separately. \
+         There is no central recovery: losing the vault or the passphrase loses the identity.",
+        k.display()
+    );
 }
 
 fn cmd_register(args: &CmdArgs) {

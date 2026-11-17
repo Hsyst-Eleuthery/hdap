@@ -7,8 +7,8 @@
 
 use base64::Engine;
 use hdap_core::auth::{
-    derive_shared_key, prove_session_secret_bound, session_storage_key, session_token,
-    verify_knowledge_bounded, verify_possession, OtpWitness,
+    derive_shared_key, prove_session_secret, prove_session_secret_bound, session_storage_key,
+    session_token, verify_knowledge_bounded, verify_possession, OtpWitness,
 };
 use hdap_core::pow::verify_pow;
 use hdap_core::time::{client_ts_matches, is_expired};
@@ -26,6 +26,24 @@ pub struct AuthModule {
 
 fn pylaia_challenge(server_id: &str, nonce: &str) -> String {
     format!("hdap-pylaia:{server_id}:{nonce}")
+}
+
+/// Factor-3 verification. The v2 proof is bound to the whole server-issued
+/// challenge; the legacy `hdap:code:` proof is accepted only for identities
+/// predating v2 and only for the exact UTC timestamp this node issued.
+fn factor3_ok(
+    k: &[u8],
+    user: &str,
+    server: &str,
+    challenge_text: &str,
+    issued_ts: u64,
+    proof: &str,
+    allow_legacy: bool,
+) -> bool {
+    if prove_session_secret_bound(k, user, server, challenge_text) == proof {
+        return true;
+    }
+    allow_legacy && prove_session_secret(k, user, server, issued_ts) == proof
 }
 
 /// Canonical text an identity key must sign to rotate its own OTP anchor.
@@ -261,13 +279,15 @@ impl AuthModule {
             return Response::json(500, json_err("stored enc pubkey invalid"));
         };
         let k = derive_shared_key(&node.node_enc_priv, &enc_pub);
-        let expected = prove_session_secret_bound(
-            &k,
+        if !factor3_ok(
+            &k[..],
             &user_id,
             &self.cfg.server_id,
             &challenge.canonical_text(),
-        );
-        if expected != code_proof {
+            rec.ts,
+            &code_proof,
+            user.accepts_legacy_f3(),
+        ) {
             return Response::json(401, json_err("factor 3 failed"));
         }
 
@@ -292,7 +312,7 @@ impl AuthModule {
 
         // --- short critical section: commit the successful login ---
         let exp = now.saturating_add(self.cfg.session_ttl_secs);
-        let token = session_token(&k, &self.cfg.server_id, exp);
+        let token = session_token(&k[..], &self.cfg.server_id, exp);
         {
             let mut st = node.lock_state();
             // Re-check under the lock: another request may have consumed it.
@@ -388,6 +408,8 @@ impl AuthModule {
         if verify_possession(&sign_pub, &text, signature).is_err() {
             return Response::json(401, json_err("identity signature required"));
         }
+        // Preserve `v2_f3`: a legacy identity stays legacy until it re-registers
+        // with a v2 client, so rotation never silently drops migration support.
         let rotated = UserRecord {
             otp_anchor_hex: new_anchor.to_string(),
             otp_k: new_k as usize,
@@ -499,6 +521,31 @@ mod tests {
     }
 
     #[test]
+    fn legacy_f3_is_accepted_only_for_pre_v2_identities() {
+        let k = [3u8; 32];
+        let user = "jose_0123456789abcdef";
+        let server = "pyle-a";
+        let ts = 1_700_000_000u64;
+        let ch = hdap_core::Challenge {
+            nonce: "nonce-abc".into(),
+            ts,
+        }
+        .canonical_text();
+        let bound = prove_session_secret_bound(&k, user, server, &ch);
+        let legacy = prove_session_secret(&k, user, server, ts);
+        assert_ne!(bound, legacy, "the two proof formats must never collide");
+
+        // v2 account: only the challenge-bound proof works.
+        assert!(factor3_ok(&k, user, server, &ch, ts, &bound, false));
+        assert!(!factor3_ok(&k, user, server, &ch, ts, &legacy, false));
+
+        // v1 account in migration: both work, but only for the issued ts.
+        assert!(factor3_ok(&k, user, server, &ch, ts, &bound, true));
+        assert!(factor3_ok(&k, user, server, &ch, ts, &legacy, true));
+        assert!(!factor3_ok(&k, user, server, &ch, ts + 1, &legacy, true,));
+    }
+
+    #[test]
     fn rotation_text_is_bound_to_both_anchors_and_chain_length() {
         let a = omphalos_rotation_text("u", "old", "new", 100);
         let b = omphalos_rotation_text("u", "old", "new", 101);
@@ -532,7 +579,7 @@ mod tests {
             ts: 1_700_000_000,
         };
         let good = prove_session_secret_bound(
-            &k,
+            &k[..],
             "u",
             "node",
             &hdap_core::Challenge {
@@ -542,7 +589,7 @@ mod tests {
             .canonical_text(),
         );
         let bad = prove_session_secret_bound(
-            &k,
+            &k[..],
             "u",
             "node",
             &hdap_core::Challenge {

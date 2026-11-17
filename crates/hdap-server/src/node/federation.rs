@@ -896,6 +896,7 @@ mod tests {
                     otp_anchor_hex: "cc".repeat(32),
                     otp_k: 1024,
                     created_at: 1000,
+                    v2_f3: true,
                     home_pyle: "node-a".into(),
                 },
             );

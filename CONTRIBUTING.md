@@ -1,5 +1,7 @@
 # Contribuindo com o HDAP
 
+*Revisão de 2026-11-17.*
+
 Obrigada pelo interesse. O HDAP é um protocolo pequeno, e mudanças pequenas e bem testadas são mais valiosas do que grandes reescritas.
 
 ## Antes de abrir uma mudança
@@ -36,9 +38,9 @@ Testes de federação e GUI podem subir nós reais em processo; siga o padrão e
 
 ## Versionamento e releases
 
-O HDAP usa dois codinomes por lançamento. O **codinome de protocolo** nomeia a geração da linguagem e muda apenas quando a comunicação ou a interpretação dos documentos muda; o **codinome de lançamento** muda em qualquer release. A versão 1.0 é o marco zero, com **Themelio · Veritas Aeterna**; a v1.001 manteve Themelio com **Epoptia**. A versão **v2.0** abre a geração **Téleia vási**, com protocolo **Teleios**, também usado nesta release como codinome de lançamento.
+Cada release tem um codinome de protocolo e um de lançamento, conforme a política em [docs/VERSAO.md](docs/VERSAO.md). A geração atual é **Téleia vási · Teleios**.
 
-Uma mudança que não altera o protocolo — correção de bug, melhoria de interface, correção de segurança, documentação ou empacotamento — gera a próxima versão de patch, como `v2.001`, com um novo codinome de lançamento e o mesmo codinome de protocolo. Uma mudança de protocolo abre a próxima versão maior e exige que os dois codinomes mudem. Toda release atualiza o [CHANGELOG](CHANGELOG.md), a documentação e as datas de revisão, e o procedimento completo está no [Guia de Execução](docs/guia-de-execucao.md). Mudanças de protocolo precisam de uma issue de semântica antes do código.
+Uma mudança que não altera o protocolo gera a próxima versão de patch (`v2.001`, `v2.002`, …); uma mudança da linguagem entre nós abre a próxima versão maior. Toda release atualiza o [CHANGELOG](CHANGELOG.md), a documentação e as datas de revisão, conforme o [Guia de Execução](docs/guia-de-execucao.md). Mudanças de protocolo precisam de uma issue de semântica antes do código.
 
 ## Commits
 

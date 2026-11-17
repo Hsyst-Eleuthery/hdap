@@ -1,5 +1,7 @@
 # Manual Técnico — HDAP
 
+*Revisão de 2026-11-17.*
+
 **HDAP v2.0 — Téleia vási · Teleios**
 
 **Escrito por Thaís (op3n/op3ny)**
@@ -351,7 +353,7 @@ O servidor imprime o pin no stderr e o expõe em `/health`. Em produção, distr
 
 O projeto não pede confiança na maturidade. Ele mostra os testes:
 
-- **250 testes automatizados** (mais um teste manual de integração com nó real);
+- **251 testes automatizados** (mais um teste manual de integração com nó real);
 - testes de dois e três nós para federação, réplica, delete e sucessão;
 - testes de GUI que renderizam a interface em 960×640 e falham se um painel sair da tela;
 - testes de segurança para replay de OTP, pin incorreto, CR isolado, request smuggling e delete de peer não-originário;
@@ -380,7 +382,7 @@ Esses limites não são falhas escondidas. São decisões de escopo documentadas
 
 ## 18. Mapa da documentação
 
-Para usar o sistema, o [Guia do Usuário](userguide.md) e os seus [seis capítulos](userguide2.md) cobrem identidade, arquivos, economia, federação e operação. A [Visão da v2](VERSAO.md) resume a geração Teleios e as diferenças em relação ao Themelio. Para compilar e empacotar, o [Guia de Execução](guia-de-execucao.md). Para a semântica normativa, a [Especificação Formal](especificacao-hdap.md). Para o formato de fio e as rotas, o [RFC-HDAP](rfc-hdap.md). Para segurança, o [Modelo de Ameaça](modelo-de-ameaca.md). Para o vocabulário, o [Léxico Grego](lexico-grego.md). Para a base econômica do módulo opcional, a [Filosofia Econômica](filosofia-economica.md). E para a história do predecessor, o [HPS](hps.md).
+Para usar o sistema, o [Guia do Usuário](guia-1-introducao.md) e os seus [seis capítulos](guia-2-identidade.md) cobrem identidade, arquivos, economia, federação e operação. A [Visão da v2](VERSAO.md) resume a geração Teleios e as diferenças em relação ao Themelio. Para compilar e empacotar, o [Guia de Execução](guia-de-execucao.md). Para a semântica normativa, a [Especificação Formal](especificacao-hdap.md). Para o formato de fio e as rotas, o [RFC-HDAP](rfc-hdap.md). Para segurança, o [Modelo de Ameaça](modelo-de-ameaca.md). Para o vocabulário, o [Léxico Grego](lexico-grego.md). Para a base econômica do módulo opcional, a [Filosofia Econômica](filosofia-economica.md). E para a história do predecessor, o [HPS](hps.md).
 
 ---
 

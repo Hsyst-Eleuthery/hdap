@@ -44,4 +44,25 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "parse_adeia_perm"
+path = "fuzz_targets/parse_adeia_perm.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_access_uri"
+path = "fuzz_targets/parse_access_uri.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_vault"
+path = "fuzz_targets/parse_vault.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]

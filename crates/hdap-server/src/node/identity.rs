@@ -98,8 +98,15 @@ impl IdentityModule {
         }
 
         let mut st = node.lock_state();
-        if st.users.contains_key(&user_id) {
-            return Response::json(409, json_err("identity already registered"));
+        if let Some(existing) = st.users.get(&user_id) {
+            if existing.sign_pub_hex == sign_pub_hex {
+                // Idempotent re-registration: the caller proved possession of
+                // the same key, so answer exactly like the first registration.
+                // Random probes with a different key still get a plain 409 and
+                // cannot be used to enumerate which nicknames are taken.
+                return Response::json(201, serde_json::json!({ "user_id": user_id }).to_string());
+            }
+            return Response::json(409, json_err("identity key conflict"));
         }
         let user = UserRecord {
             user_id: user_id.clone(),
@@ -110,6 +117,7 @@ impl IdentityModule {
             otp_anchor_hex,
             otp_k,
             created_at: doc.created_at,
+            v2_f3: true,
             home_pyle: self.cfg.server_id.clone(),
         };
         st.users.insert(user_id.clone(), user.clone());
@@ -304,6 +312,7 @@ impl IdentityModule {
                 otp_anchor_hex,
                 otp_k,
                 created_at: props.created_at,
+                v2_f3: true,
                 home_pyle: new_pyle.clone(),
             },
         );
@@ -750,6 +759,7 @@ impl IdentityModule {
                 otp_anchor_hex: otp_anchor_hex.clone(),
                 otp_k,
                 created_at: doc.created_at,
+                v2_f3: true,
                 home_pyle: self.cfg.server_id.clone(),
             };
             st.users.insert(user_id.clone(), user.clone());
@@ -799,6 +809,7 @@ impl IdentityModule {
                 otp_anchor_hex,
                 otp_k,
                 created_at: existing.created_at,
+                v2_f3: true,
                 home_pyle: existing.home_pyle.clone(),
             },
         );
@@ -970,6 +981,7 @@ mod house_move_tests {
                     otp_anchor_hex: "cc".repeat(32),
                     otp_k: 4096,
                     created_at: 1000,
+                    v2_f3: true,
                     home_pyle: "pyle-a".into(),
                 },
             );

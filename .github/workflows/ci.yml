@@ -2,14 +2,19 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, v2-teleia]
+    tags: ['v*']
   pull_request:
-    branches: [main]
+    branches: [main, v2-teleia]
 
 jobs:
   check:
-    name: Check + Test (stable)
-    runs-on: ubuntu-latest
+    name: Check + Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -18,8 +23,10 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
       - name: Check formatting
+        if: runner.os == 'Linux'
         run: cargo fmt --all --check
       - name: Lint
+        if: runner.os == 'Linux'
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Build
         run: cargo build --workspace --all-targets
@@ -29,7 +36,7 @@ jobs:
   fuzz:
     name: Fuzzing (nightly)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'fuzz')
     steps:
       - uses: actions/checkout@v4
@@ -50,10 +57,19 @@ jobs:
         run: cargo +nightly fuzz build
       - name: Fuzz parse_hdap_doc
         working-directory: ./fuzz
-        run: timeout 300 cargo +nightly fuzz run parse_hdap_doc -- -runs=10000 -max_total_time=120
+        run: cargo +nightly fuzz run parse_hdap_doc -- -runs=10000 -max_total_time=90
       - name: Fuzz parse_http_request
         working-directory: ./fuzz
-        run: timeout 300 cargo +nightly fuzz run parse_http_request -- -runs=10000 -max_total_time=120
+        run: cargo +nightly fuzz run parse_http_request -- -runs=10000 -max_total_time=90
+      - name: Fuzz parse_adeia_perm
+        working-directory: ./fuzz
+        run: cargo +nightly fuzz run parse_adeia_perm -- -runs=10000 -max_total_time=90
+      - name: Fuzz parse_access_uri
+        working-directory: ./fuzz
+        run: cargo +nightly fuzz run parse_access_uri -- -runs=10000 -max_total_time=90
+      - name: Fuzz parse_vault
+        working-directory: ./fuzz
+        run: cargo +nightly fuzz run parse_vault -- -runs=10000 -max_total_time=90
 
   audit:
     name: Security Audit
@@ -65,6 +81,12 @@ jobs:
         run: cargo install cargo-audit
       - name: Audit dependencies
         run: cargo audit
+      - name: Install cargo-outdated
+        run: cargo install cargo-outdated
+      - name: "Advisory: outdated dependencies"
+        # A new upstream version is information, not automatically a failure.
+        continue-on-error: true
+        run: cargo outdated --workspace --exit-code 1
 
   msrv:
     name: MSRV Check (1.95)
@@ -78,3 +100,38 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: Build with MSRV
         run: cargo build --workspace --all-targets
+
+  release:
+    name: Release artifacts (${{ matrix.target }})
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
+          - x86_64-pc-windows-gnu
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+      - name: Install cargo-zigbuild
+        run: cargo install cargo-zigbuild
+      - name: Cross-release
+        run: ./scripts/cross-release.sh ${{ matrix.target }}
+      - name: Publish to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          fail_on_unmatched_files: false
+          files: |
+            target/release-assets/*.tar.gz
+            target/release-assets/*.zip
+            target/release-assets/*.sha256

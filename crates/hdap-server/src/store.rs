@@ -22,6 +22,12 @@ pub struct UserRecord {
     pub otp_anchor_hex: String,
     pub otp_k: usize,
     pub created_at: u64,
+    /// Whether this identity was registered by a v2 client. Records loaded
+    /// from a v1 database lack the field and default to `false`, which lets
+    /// them finish migration with the legacy `hdap:code:` F3 proof. New v2
+    /// registrations always set `true` and must use the challenge-bound proof.
+    #[serde(default)]
+    pub v2_f3: bool,
     /// Current home pyle. Empty on legacy records and on identities that have
     /// never moved; readers treat empty as "this pyle". A relayed house move
     /// writes the *new* home here, so a third pyle that only saw the signed
@@ -32,6 +38,11 @@ pub struct UserRecord {
 }
 
 impl UserRecord {
+    /// Legacy F3 is offered only to identities that predate v2.
+    pub fn accepts_legacy_f3(&self) -> bool {
+        !self.v2_f3
+    }
+
     pub fn sign_pub_bytes(&self) -> Option<[u8; 32]> {
         let raw = hex::decode(&self.sign_pub_hex).ok()?;
         raw.try_into().ok()

@@ -233,7 +233,7 @@ pub fn authenticate(
     // substitutes a local timestamp, so timezone differences cannot cause a
     // "factor 3 failed" error.
     let k = derive_shared_key(&identity.enc_secret, &node_enc_pub_bytes);
-    let code_proof = prove_session_secret_bound(&k, user_id, &server_id, &ch.canonical_text());
+    let code_proof = prove_session_secret_bound(&k[..], user_id, &server_id, &ch.canonical_text());
 
     // Entry toll (`pylaia`, §7.4). The node ships the challenge with the
     // `proklesis`, bound to its nonce, so this is fresh work per login and

@@ -1,13 +1,15 @@
 # Identidade e a Casa
 
+*Revisão de 2026-11-17.*
+
 **HDAP v2.0 — Téleia vási · Teleios**
 
 **Escrito por Thaís (op3n/op3ny)**
 
 ---
 
-**Leia primeiro:** [userguide.md](userguide.md) (visão geral)
-**Próximo:** [userguide3.md](userguide3.md) (Arquivos, Documentos e Permissões)
+**Leia primeiro:** [guia-1-introducao.md](guia-1-introducao.md) (visão geral)
+**Próximo:** [guia-3-arquivos.md](guia-3-arquivos.md) (Arquivos, Documentos e Permissões)
 
 ---
 
@@ -63,7 +65,7 @@ Você pode mudar a base do diretório com a variável de ambiente `HDAP_HOME`. O
 
 Você não precisa decorar os nomes dos algoritmos, mas vale saber o que cada peça faz, porque isso ajuda a entender o que está protegido e o que não está.
 
-O **Ed25519** é o algoritmo de assinatura. Ele prova autoria e integridade. Gera assinaturas pequenas e rápidas de verificar, e é o que aparece em todos os documentos assinados do protocolo. Pense nele como um carimbo que ninguém consegue falsificar sem a chave privada.
+O **Ed25519** é o algoritmo de assinatura. Ele prova **posse da chave sobre os bytes** e integridade — o que chamamos de autoria registrada. Gera assinaturas pequenas e rápidas de verificar, e é o que aparece em todos os documentos assinados do protocolo. Pense nele como um carimbo que ninguém consegue falsificar sem a chave privada. Ele não prova que a pessoa **criou** o conteúdo: copiar um arquivo público e assiná-lo é possível, e o protocolo registra quem assinou primeiro, não quem o inventou.
 
 O **X25519** é usado na etapa de transporte do login. Ele permite que o cliente demonstre conhecer um segredo derivado sem revelá-lo explicitamente. É uma camada adicional contra ataques de replay e contra a tentativa de se passar por você com uma assinatura capturada.
 
@@ -204,4 +206,4 @@ Vale repetir: o HDAP não tem "esqueci minha senha". Ele tem backup. A diferenç
 
 ---
 
-**Leia agora:** [userguide3.md](userguide3.md) — Arquivos, Documentos e Permissões
+**Leia agora:** [guia-3-arquivos.md](guia-3-arquivos.md) — Arquivos, Documentos e Permissões

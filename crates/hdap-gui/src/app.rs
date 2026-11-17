@@ -723,6 +723,12 @@ impl App {
         identity_store::save(&id, self.password.as_bytes(), &krypte, &pros)
             .map_err(|e| FlowError::Proto(format!("save identity: {e:?}")))?;
         self.identity = Some(id.clone());
+        // Guided backup prompt: there is no central recovery, so say it at the
+        // exact moment the vault is created instead of only in the docs.
+        self.say(
+            "⚠ Faça backup de krypte.hdap agora / Back up krypte.hdap now — \
+             sem o cofre e a senha não há recuperação / no recovery without the vault and passphrase",
+        );
         Ok(id)
     }
 
@@ -3521,7 +3527,7 @@ mod tests {
             require_entry_pow: false,
             require_content_signature: false,
             max_body_bytes: 10 * 1024 * 1024,
-            motd: "HDAP Ángelma de teste · HDAP{[time_utc]}".into(),
+            motd: "HDAP Ángelma de teste · HDAP{[date_utc]}".into(),
             // The test drives many steps in a tight loop; the per-peer limiter
             // would otherwise reject the burst unrelated to what is asserted.
             rate_limit_per_sec: 0,

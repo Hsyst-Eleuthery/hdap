@@ -58,9 +58,10 @@ fn print_usage() {
            --pylaia-target N     entry PoW difficulty in bits (default 12)\n  \
            --rate-limit N       max requests/sec per peer (0 disables)\n  \
            --motd TEXT          Ángelma (message of the day); HDAP{{[tag]}} placeholders\n  \
-           --motd-file FILE     read the Ángelma from a UTF-8 file (overrides --motd)\n  \
+           --motd-file FILE     read the Ángelma from a UTF-8 file (last one wins)\n  \
            --master-key-file FILE  store the blob key outside the DB (hex, 0600)\n  \
            --max-connections N  simultaneous connections (default 256)\n  \
+           --max-challenges N  outstanding login challenges per user (default 4)\n  \
            --cleanup-interval N seconds between expiry purges; 0 disables (default 60)\n  \
            --time-tolerance N   federation clock-skew tolerance in seconds (default 300)\n  \
            --help               show usage\n  \
@@ -131,6 +132,9 @@ fn parse_args() -> Args {
             }
             "--max-connections" => {
                 out.cfg.max_connections = parse_value(&mut args, "--max-connections")
+            }
+            "--max-challenges" => {
+                out.cfg.max_proklesis_per_user = parse_value(&mut args, "--max-challenges")
             }
             "--cleanup-interval" => {
                 out.cfg.cleanup_interval_secs = parse_value(&mut args, "--cleanup-interval")
@@ -245,8 +249,10 @@ fn load_or_create_master_key(
         }
     }
     write_key_file(path, &key)?;
-    eprintln!(
-        "hdap-server: master key created at {} — back it up; without it the archive is unreadable",
+    hdap_server::hlog!(
+        warn,
+        "key",
+        "master key created at {} — back it up; without it the archive is unreadable",
         path.display()
     );
     Ok(key)
@@ -289,14 +295,14 @@ fn main() -> ExitCode {
         Some(path) => match load_or_create_master_key(&path, &db_path, args.ephemeral) {
             Ok(key) => Some(key),
             Err(e) => {
-                eprintln!("hdap-server: {e}");
+                hdap_server::hlog!(error, "startup", "{e}");
                 return ExitCode::FAILURE;
             }
         },
         None => {
-            eprintln!(
-                "hdap-server: AVISO — chave mestra dentro do banco (legado). \
-                 Use --master-key-file FILE para manter a chave fora do arquivo de arquivos."
+            hdap_server::hlog!(
+                warn, "startup",
+                "chave mestra dentro do banco (legado). Use --master-key-file FILE para mantê-la fora do banco."
             );
             None
         }
@@ -309,7 +315,7 @@ fn main() -> ExitCode {
     let listener = match TcpListener::bind(&args.listen) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("hdap-server: cannot bind {}: {e}", args.listen);
+            hdap_server::hlog!(error, "startup", "cannot bind {}: {e}", args.listen);
             return ExitCode::FAILURE;
         }
     };
@@ -324,9 +330,9 @@ fn main() -> ExitCode {
     // the federation API in cleartext — the flag's own help text already says
     // "loopback/dev only".
     if args.no_tls && !is_loopback_bind(&args.listen) {
-        eprintln!(
-            "hdap-server: --no-tls exige --listen em loopback (127.0.0.1, ::1 ou localhost); \
-             recusando expor HTTP em claro em {}",
+        hdap_server::hlog!(
+            error, "startup",
+            "--no-tls exige --listen em loopback (127.0.0.1, ::1 ou localhost); recusando HTTP em claro em {}",
             args.listen
         );
         return ExitCode::FAILURE;
@@ -348,17 +354,17 @@ fn main() -> ExitCode {
         let tls = match tls {
             Ok(id) => {
                 let pin = id.pin();
-                eprintln!("hdap-server: tls_pin={pin} (client TOFU anchor)");
+                hdap_server::hlog!(warn, "tls", "tls_pin={pin} (client TOFU anchor)");
                 match id.server_config() {
                     Ok(cfg) => Some((pin, cfg)),
                     Err(e) => {
-                        eprintln!("hdap-server: TLS config failed: {e}");
+                        hdap_server::hlog!(error, "tls", "TLS config failed: {e}");
                         return ExitCode::FAILURE;
                     }
                 }
             }
             Err(e) => {
-                eprintln!("hdap-server: TLS keygen failed: {e}");
+                hdap_server::hlog!(error, "tls", "TLS keygen failed: {e}");
                 return ExitCode::FAILURE;
             }
         };
@@ -387,43 +393,56 @@ fn main() -> ExitCode {
     // unreadable database is a startup failure with a clear message rather
     // than a node that answers `200` while silently keeping nothing.
     if args.ephemeral {
-        eprintln!("hdap-server: --ephemeral: NADA será salvo, tudo morre com o processo");
+        hdap_server::hlog!(
+            warn,
+            "startup",
+            "--ephemeral: NADA será salvo, tudo morre com o processo"
+        );
         let db = match hdap_server::db::Db::open_memory_with_master_key(external_key) {
             Ok(db) => db,
             Err(e) => {
-                eprintln!("hdap-server: banco em memória falhou: {e}");
+                hdap_server::hlog!(error, "startup", "banco em memória falhou: {e}");
                 return ExitCode::FAILURE;
             }
         };
         if let Err(e) = node.with_db(std::sync::Arc::new(db)) {
-            eprintln!("hdap-server: estado inicial falhou: {e}");
+            hdap_server::hlog!(error, "startup", "estado inicial falhou: {e}");
             return ExitCode::FAILURE;
         }
     } else {
         let db = match hdap_server::db::Db::open_with_master_key(&db_path, external_key) {
             Ok(db) => db,
             Err(e) => {
-                eprintln!("hdap-server: não consegui abrir {}: {e}", db_path.display());
+                hdap_server::hlog!(
+                    error,
+                    "startup",
+                    "não consegui abrir {}: {e}",
+                    db_path.display()
+                );
                 return ExitCode::FAILURE;
             }
         };
         let db = std::sync::Arc::new(db);
         if let Err(e) = node.with_db(db.clone()) {
-            eprintln!(
-                "hdap-server: estado gravado em {} é ilegível: {e}",
+            hdap_server::hlog!(
+                error,
+                "startup",
+                "estado gravado em {} é ilegível: {e}",
                 db_path.display()
             );
             return ExitCode::FAILURE;
         }
         if let Err(e) = node.persist() {
-            eprintln!("hdap-server: falha ao gravar o estado inicial: {e}");
+            hdap_server::hlog!(error, "startup", "falha ao gravar o estado inicial: {e}");
             return ExitCode::FAILURE;
         }
         // Read the counts *after* the load, so "retomado" reflects the file.
         let n_users = node.lock_state().users.len();
         let resuming = n_users > 0;
-        println!(
-            "hdap-server: banco {} ({})",
+        hdap_server::hlog!(
+            info,
+            "startup",
+            "banco {} ({})",
             db_path.display(),
             if resuming {
                 format!("retomado: {n_users} conta(s)")
@@ -435,8 +454,10 @@ fn main() -> ExitCode {
 
     // `node` is moved into the handler below, so read the id out first.
     let server_id = node.cfg.server_id.clone();
-    println!(
-        "hdap-server {} on {} node_id={}",
+    hdap_server::hlog!(
+        info,
+        "startup",
+        "{} on {} node_id={}",
         if args.no_tls { "(plaintext)" } else { "(TLS)" },
         args.listen,
         server_id
@@ -449,7 +470,11 @@ fn main() -> ExitCode {
         let cleanup_node = std::sync::Arc::clone(&node);
         std::thread::spawn(move || hdap_server::node::cleanup::run_forever(cleanup_node));
     } else {
-        eprintln!("hdap-server: AVISO — limpeza periódica desativada (--cleanup-interval 0)");
+        hdap_server::hlog!(
+            warn,
+            "cleanup",
+            "limpeza periódica desativada (--cleanup-interval 0)"
+        );
     }
     let limiter = hdap_server::http::ConnectionLimiter::new(max_connections);
     let handle = move |req: hdap_server::http::Request| node.handle(&req);
@@ -460,7 +485,7 @@ fn main() -> ExitCode {
         }
     };
     if let Err(e) = result {
-        eprintln!("hdap-server: serve error: {e}");
+        hdap_server::hlog!(error, "serve", "serve error: {e}");
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS

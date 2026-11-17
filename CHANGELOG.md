@@ -1,6 +1,8 @@
 # Histórico
 
-O HDAP usa dois codinomes por lançamento. O **codinome de protocolo** nomeia uma geração da linguagem do protocolo e muda apenas quando a forma de comunicação ou de interpretação dos documentos muda. O **codinome de lançamento** nomeia o pacote e muda em qualquer release. A versão 1.0 é o marco zero, com o protocolo **Themelio** e o lançamento **Veritas Aeterna**; a v1.001 manteve **Themelio** com o lançamento **Epoptia**. A v2.0 abre a geração **Téleia vási**, com o protocolo **Teleios**, também usado como codinome de lançamento. Correções dentro de uma geração saem como `v2.001`, `v2.002` e assim por diante, com novo codinome de lançamento e o mesmo codinome de protocolo. Mudanças de protocolo abrem a próxima versão maior e trocam os dois codinomes. Toda release atualiza a documentação.
+*Revisão de 2026-11-17.*
+
+O HDAP usa um codinome de protocolo e um de lançamento por release; a política completa está em [docs/VERSAO.md](docs/VERSAO.md). A geração atual é **Téleia vási · Teleios**.
 
 ## v2.0 — 2026-11-17
 
@@ -42,11 +44,23 @@ Geração **Téleia vási**. Codinome de protocolo: **Teleios**. Codinome de lan
 ### Compatibilidade e qualidade
 
 - Cofre local versionado: cabeçalho `HDAPVAULT\0\x02` com parâmetros Argon2 no cabeçalho (padrão 64 MiB/t=2/p=1); cofres v1 (19 MiB/t=2/p=1) continuam legíveis. Limites de sanidade impedem parâmetros absurdos em cofres v2.
-- 250 testes automatizados; novos testes cobrem rotação assinada na CLI e na GUI, F3 vinculado, cofre v1/v2, chave externa, sessões hashadas e exibição da Ángelma.
+- 251 testes automatizados; novos testes cobrem rotação assinada na CLI e na GUI, F3 vinculado, cofre v1/v2, chave externa, sessões hashadas e exibição da Ángelma.
 
 ### Documentação
 
 - Novo [resumo da geração v2](docs/VERSAO.md); README, especificação, RFC, manual técnico, modelo de ameaça, léxico, guias e política de segurança atualizados para `2.0.0` / **Téleia vási · Teleios**.
+
+### Fechamento da revisão (2026-11-17)
+
+- **F3 legado com comportamento preciso:** `UserRecord.v2_f3` (padrão `false` em registros vindos do banco v1, `true` em todo registro novo) decide quem pode usar a prova antiga `hdap:code:{user}:{server}:{ts}`. A verificação passou por `factor3_ok()`, que exige casamento exato com o `ts` emitido pelo nó; a rotação OMPHALOS preserva o marcador. Teste dedicado: `legacy_f3_is_accepted_only_for_pre_v2_identities`.
+- **Enumeração reduzida no registro:** re-registrar com a **mesma** chave pública é idempotente (retorna `201` como na primeira vez); outra chave para o mesmo `user_id` recebe `409 identity key conflict`, sem revelar se o nome existe.
+- **Teto de desafios configurável:** `--max-challenges N` (padrão `4`) controla `max_proklesis_per_user`, antes fixo.
+- **Zeroização reforçada:** `derive_shared_key` retorna `Zeroizing<[u8; 32]>` e a raiz HKDF da cadeia OTP também é zeroizada; todos os chamadores em núcleo, servidor e CLI foram ajustados.
+- **Pins oficiais publicados:** [docs/pins-oficiais.md](docs/pins-oficiais.md) traz os `tls_pin` reais lidos de `/health`, as chaves de cada nó e a impressão digital OpenPGP `1489 36AB E859 A3A9 0ED1 E17A 5FF5 3F39 FFC4 D03F` para verificação fora da banda. Um manifesto **assinado** depende da chave privada da mantenedora e não é gerado automaticamente.
+- **Logging unificado:** todo o startup do servidor usa `hlog!` com níveis e tags; restam apenas os `println!` de `--help`/`--version`. `run.sh` passou a usar arquivos PID em vez de `pkill -f hdap-gui`, e `--motd-file` documenta a regra "last one wins".
+- **Backup guiado:** `hdap-cli init` imprime um aviso `BACK UP NOW` com o caminho do cofre; a GUI exibe o lembrete no momento em que cria a identidade. A documentação esclarece que assinatura prova posse da chave sobre os bytes, **não** criação do conteúdo: `origin_user` registra quem assinou e enviou primeiro, separado de `namespace_owner`.
+- **CI, fuzz e implantação:** cinco alvos de fuzz (documento `.hdap`, request HTTP, `adeia`/permissões, URI `HDAP!` e cofre `krypte.hdap`); CI em Linux/Windows/macOS, `cargo outdated` como aviso e release automático em tags `v*`. Novos `Dockerfile`, `docker-entrypoint.sh`, `docs/hdap-server.service` (systemd) e seção de implantação no guia de execução.
+- **Documentação navegável:** os guia do usuário passaram a se chamar `guia-1-introducao.md` … `guia-6-operacao.md`, com todos os links e âncoras validados; `security.txt` e `.well-known/security.txt` ganharam `Canonical` e `Encryption` corretos; datas de revisão aparecem nos arquivos principais.
 
 ## v1.001 — 2026-10-29
 

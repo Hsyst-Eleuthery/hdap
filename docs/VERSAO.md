@@ -60,7 +60,7 @@ F1 (Ed25519), F2 (OTP) e F3 (HMAC de `K`) continuam sendo os três fatores. A di
 hdap:f3:v2:{user_id}:{server_id}:hdap:challenge:{nonce}:{ts}
 ```
 
-Um atacante que capture uma prova F3 de uma sessão não pode reaplicá-la em outro desafio, mesmo com o mesmo `user_id` e `server_id`. A prova antiga (`hdap:code:...`) ainda é aceita para que identidades criadas antes da Teleios consigam migrar.
+Um atacante que capture uma prova F3 de uma sessão não pode reaplicá-la em outro desafio, mesmo com o mesmo `user_id` e `server_id`. A prova antiga (`hdap:code:...`) continua aceita **somente** para identidades criadas antes da Teleios: `UserRecord.v2_f3` nasce `false` nos registros migrados do banco v1 (via `#[serde(default)]`) e `true` em toda registro novo. A verificação passa por `factor3_ok()`, que compara a prova com o `ts` exato emitido pelo nó; a rotação OMPHALOS preserva o marcador, então um cliente v1 em migração não perde o acesso ao trocar a âncora.
 
 A cadeia OTP é limitada em dois lugares: `MAX_OTP_CHAIN_LEN = 4096` como teto absoluto e o `otp_k` registrado para aquele usuário como limite real. O servidor **nunca** usa um `seed_iter` enviado pelo cliente para decidir quantos passos verificar.
 
@@ -131,6 +131,8 @@ hdap-cli --pass-env HDAP_PASS --tls-pin "$PIN" auth
 
 `rotate TOKEN` exige a chave de identidade além do token: envia `POST /omphalos` com `otp_anchor`, `seed_iter = otp_k + 1` e `identity_signature` sobre `hdap:omphalos:v2:{user}:{old_anchor}:{new_anchor}:{new_k}`. Depois de rodá-lo, o cofre local é regravado, `omphalos.step` volta a `1` e é preciso fazer `auth` de novo para obter um token da nova cadeia.
 
+Tanto `hdap init` quanto a criação da identidade na GUI emitem um aviso guiado de backup: copie `krypte.hdap` para outro lugar físico e guarde a passphrase separadamente. Não existe recuperação central — perder o cofre ou a senha é perder a identidade.
+
 A GUI mostra a Ángelma e o UTC do nó, usa `HH:MM:SS UTC` no rótulo de sincronização e oferece o botão "🔑" para a mesma rotação assinada. Todos os textos novos estão em PT/EN/ES/FR.
 
 ---
@@ -139,7 +141,10 @@ A GUI mostra a Ángelma e o UTC do nó, usa `HH:MM:SS UTC` no rótulo de sincron
 
 - `--max-connections N` (padrão `256`) limita conexões simultâneas; acima dele, o nó responde `503 {"error":"connection limit reached"}` sem abrir thread.
 - `--cleanup-interval N` (padrão `60` s) remove `proklesis` e sessões expirados; `0` desativa o worker.
+- `--max-challenges N` (padrão `4`) limita desafios de fator 1 em aberto por usuário, antes fixo em código.
 - Rate limiting por requisição usa `Request.peer` — o IP do socket — em vez de um header que o cliente poderia escolher.
+- Re-registrar com a mesma chave pública é idempotente; outra chave para o mesmo `user_id` recebe `409 identity key conflict`, sem revelar quais nomes já existem.
+- O startup do nó é registrado com `hlog!` (nível + tag), e `run.sh` usa arquivos PID em vez de `pkill -f hdap-gui`.
 - Locks envenenados são recuperados em vez de transformar uma panica em falha permanente; um nó em estado degradado responde `503`.
 - Handlers de rede não usam `unwrap`/`expect` em caminhos alcançáveis por entrada remota.
 - `--time-tolerance` altera apenas a checagem de skew das assinaturas de federação, nunca a validade de uma sessão ou desafio.

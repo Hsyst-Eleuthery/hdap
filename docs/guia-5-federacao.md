@@ -1,13 +1,15 @@
 # Federação, Réplicas e Sucessão
 
+*Revisão de 2026-11-17.*
+
 **HDAP v2.0 — Téleia vási · Teleios**
 
 **Escrito por Thaís (op3n/op3ny)**
 
 ---
 
-**Leia primeiro:** [userguide4.md](userguide4.md) (Banda, Economia e Reputação)
-**Próximo:** [userguide6.md](userguide6.md) (Aplicativos e Operação)
+**Leia primeiro:** [guia-4-banda.md](guia-4-banda.md) (Banda, Economia e Reputação)
+**Próximo:** [guia-6-operacao.md](guia-6-operacao.md) (Aplicativos e Operação)
 
 ---
 
@@ -126,4 +128,4 @@ O que ela promete é mais modesto e mais útil. Promete que nenhum operador pode
 
 ---
 
-**Leia agora:** [userguide6.md](userguide6.md) — Aplicativos e Operação
+**Leia agora:** [guia-6-operacao.md](guia-6-operacao.md) — Aplicativos e Operação
