@@ -1,4 +1,14 @@
 use crate::i18n::{Lang, Strings};
+use crate::net::{
+    build_diadosi, build_house_move, build_tree, fetch_bubble, fetch_hash_lookup, load_local,
+    post_diadosi, post_house_move,
+};
+#[cfg(test)]
+use crate::state::BubblePeer;
+use crate::state::{
+    BubbleStatus, ConnectDone, HashLookup, HouseMoveDone, Pending, PowState, PreviewState, Session,
+    Toast, ToastKind, CONNECT_DEADLINE,
+};
 use hdap_cli::flow::{
     accept_transfer, authenticate, delete, download, fetch_prices, list_ktema, publish_alias,
     register, request_transfer, resolve, resolve_cross_pyle, resolve_user, rotate_omphalos,
@@ -12,101 +22,6 @@ use hdap_core::pow::Canceller;
 use hdap_core::RecoveryPhrase;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
-
-/// A login session against one pyle (per-node session, skill.md §7.3).
-#[derive(Clone, Debug)]
-pub struct Session {
-    pub user_id: String,
-    pub token: String,
-    pub exp: u64,
-    pub server_id: String,
-    /// Pin the node advertised on `/health`. Adopted by `App::poll_connect` when
-    /// the user connected with an empty pin field, so later requests are
-    /// actually anchored (real TOFU) instead of re-accepting any cert.
-    pub tls_pin: Option<String>,
-}
-
-impl Session {
-    pub fn friendly_ttl(&self) -> String {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let left = self.exp.saturating_sub(now);
-        format!("{left}s")
-    }
-}
-
-/// Transient notification shown as a toast.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ToastKind {
-    Info,
-    Success,
-    Error,
-}
-
-#[derive(Debug, Clone)]
-pub struct Toast {
-    pub id: u64,
-    pub kind: ToastKind,
-    pub text: String,
-    pub born: f64,
-}
-
-/// A running proof-of-work, reported to the GUI in real time (HPS-style
-/// "mining" dialog). The solver runs on a background thread; the view polls
-/// `attempts`/`result` each frame.
-pub struct PowState {
-    pub target_bits: usize,
-    pub attempts: Arc<AtomicU64>,
-    pub started: std::time::Instant,
-    pub canceller: Arc<Canceller>,
-    pub result: Pending<Result<u64, String>>,
-}
-
-/// Integrated file preview state (text, image, audio).
-#[derive(Debug, Clone)]
-pub struct PreviewState {
-    pub path: String,
-    pub content_type: PreviewContentType,
-    pub data: Vec<u8>,
-    pub hash: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PreviewContentType {
-    Text,
-    Image,
-    Audio,
-    Unknown,
-}
-
-impl PreviewState {
-    pub fn from_path(path: &str) -> Option<Self> {
-        let ext = std::path::Path::new(path)
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_lowercase();
-        let content_type = match ext.as_str() {
-            "txt" | "md" | "rs" | "toml" | "json" | "yaml" | "yml" | "log" | "csv" | "html"
-            | "css" | "js" | "ts" | "py" | "sh" | "cfg" | "conf" | "ini" | "text" => {
-                PreviewContentType::Text
-            }
-            "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "ico" | "svg" => {
-                PreviewContentType::Image
-            }
-            "mp3" | "wav" | "ogg" | "flac" | "m4a" | "aac" | "opus" => PreviewContentType::Audio,
-            _ => PreviewContentType::Unknown,
-        };
-        Some(Self {
-            path: path.to_string(),
-            content_type,
-            data: Vec::new(),
-            hash: String::new(),
-        })
-    }
-}
 
 /// The configuration documents the spec defines for a `ktema`: file name,
 /// template id, and what it is for. This is the catalog the Config panel
@@ -156,57 +71,6 @@ pub enum SidePanel {
     Config,
     HouseMove,
     Diadosi,
-}
-
-/// A background worker result slot, polled by `tick`.
-type Pending<T> = Arc<Mutex<Option<T>>>;
-
-/// `(session, next OTP step, rendered /health payload)` from a connect.
-type ConnectDone = Result<(Session, usize, serde_json::Value), String>;
-
-/// `(new_pyle, installed adeia edition, installed adeia text)`.
-type HouseMoveDone = (String, u64, String);
-
-/// Hard ceiling on one connect attempt. The worker itself is bounded per
-/// request (8s connect / 20s I/O) but a whole login is several round-trips,
-/// so without this the wizard could sit on "conectando" for minutes.
-const CONNECT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(45);
-
-/// One pyle in the global discovery bubble.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct BubblePeer {
-    pub node_id: String,
-    pub endpoint: String,
-    pub tier: String,
-    pub verified: bool,
-    pub failures: u32,
-    pub last_seen: u64,
-}
-
-/// Summary shown as `Bolha: N pyles (core, extended, untrusted)`.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct BubbleStatus {
-    pub total: usize,
-    pub core: usize,
-    pub extended: usize,
-    pub untrusted: usize,
-    pub peers: Vec<BubblePeer>,
-}
-
-/// Result of `POST /resolve_hash`: either a copy already here (`local`) or a
-/// blob pulled from a ledger-named pyle (`fetched`), cached in our namespace.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct HashLookup {
-    pub status: String,
-    pub owner: String,
-    pub path: String,
-    pub source: String,
-    pub verified: bool,
-    /// Every pyle the ledger names for this digest (origin first), so a hash
-    /// search answers "who has a copy" instead of only "where did this one
-    /// download come from".
-    pub holders: Vec<String>,
-    pub error: String,
 }
 
 /// State model of the explorer. All network access is done here; the egui
@@ -3232,31 +3096,6 @@ fn clock_str() -> String {
     )
 }
 
-fn load_local(
-    password: &str,
-    krypte: &std::path::Path,
-    pros: &std::path::Path,
-) -> Result<Identity, hdap_cli::IdentityStoreError> {
-    identity_store::load(password.as_bytes(), krypte, pros)
-}
-
-/// Bucket the flat snapshot `ktema` list into `dir -> entries`. A file at
-/// `docs/sub/a.txt` lands in bucket `docs/sub`; the root-level files and dirs
-/// land in bucket `""`. Directories appear in their *parent* bucket (the node
-/// lists `docs` and `docs/sub` as `dir: true` entries with their full path).
-fn build_tree(snapshot: &[KtemaEntry]) -> std::collections::BTreeMap<String, Vec<KtemaEntry>> {
-    let mut tree: std::collections::BTreeMap<String, Vec<KtemaEntry>> =
-        std::collections::BTreeMap::new();
-    for e in snapshot {
-        let dir = match e.path.rfind('/') {
-            Some(i) => e.path[..i].to_string(),
-            None => String::new(),
-        };
-        tree.entry(dir).or_default().push(e.clone());
-    }
-    tree
-}
-
 #[cfg(test)]
 impl App {
     /// Synchronous band claim for tests (blocks until PoW done).
@@ -3280,198 +3119,6 @@ impl App {
         self.band = total;
         self.status = format!("banda agora {total} bytes");
     }
-}
-
-/// Build the signed `diadosi.hdap` body. The document is signed by the owner
-/// over its canonical bytes, and pins the current prosopeion/adeia hashes so
-/// a fallback can only promote the exact identity it was authorized for.
-fn build_diadosi(
-    identity: &Identity,
-    home: &str,
-    fallbacks: &[String],
-    properties: &str,
-    adeia: &str,
-    edition: u64,
-    prev_hash: Option<String>,
-) -> Result<Vec<u8>, String> {
-    let adeia_doc = hdap_core::doc::parse(adeia).map_err(|e| e.to_string())?;
-    if adeia_doc.doc_type != hdap_core::doc::DocType::Adeia {
-        return Err("adeia.hdap is not an adeia document".into());
-    }
-    let owner = identity.global_id();
-    let proxy = hdap_core::protocol::DiadosiDoc {
-        owner: owner.clone(),
-        owner_pubkey: hex::encode(identity.sign_pubkey()),
-        home_pyle: home.to_string(),
-        fallbacks: fallbacks.to_vec(),
-        adeia_edition: adeia_doc.edition,
-        adeia_hash: hdap_core::crypto::sha256_hex(adeia.as_bytes()),
-        properties_hash: hdap_core::crypto::sha256_hex(properties.as_bytes()),
-        edition,
-        prev_hash,
-        created_at: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0),
-    };
-    let mut doc = proxy.to_doc();
-    doc.sigs.push(hdap_core::doc::Signature {
-        signer: owner,
-        signer_pubkey: Some(proxy.owner_pubkey.clone()),
-        signature: String::new(),
-    });
-    let input = doc.signature_input(0).map_err(|e| e.to_string())?;
-    doc.sigs[0].signature = hdap_core::sig_to_b64(&identity.sign_bytes(input.as_bytes()));
-    Ok(doc.render().into_bytes())
-}
-
-fn post_diadosi(
-    client: &HttpClient,
-    token: &str,
-    body: &[u8],
-    edition: u64,
-) -> Result<u64, String> {
-    let resp = client
-        .post_with_token("/diadosi", &std::collections::BTreeMap::new(), token, body)
-        .map_err(|e| e.to_string())?;
-    let v: serde_json::Value = serde_json::from_slice(&resp.body).map_err(|e| e.to_string())?;
-    if !(200..300).contains(&resp.status) {
-        return Err(v["error"]
-            .as_str()
-            .map(str::to_string)
-            .unwrap_or_else(|| format!("diadosi {}", resp.status)));
-    }
-    Ok(v["edition"].as_u64().unwrap_or(edition))
-}
-
-/// Build the signed `POST /house_move` body. `current` is the node-truth
-/// `adeia`; the new edition is strictly newer and points `PREV_HASH` at it.
-pub(crate) fn build_house_move(
-    identity: &Identity,
-    new_pyle: &str,
-    edited_adeia: &str,
-    current_adeia: &str,
-    now: u64,
-) -> Result<Vec<u8>, String> {
-    let current = hdap_core::doc::parse(current_adeia)
-        .map_err(|_| "current adeia is not a valid document".to_string())?;
-    if current.doc_type != hdap_core::doc::DocType::Adeia {
-        return Err("current document is not an adeia".into());
-    }
-    let mut next =
-        hdap_core::doc::parse(edited_adeia).map_err(|e| format!("new adeia is invalid: {e:?}"))?;
-    if next.doc_type != hdap_core::doc::DocType::Adeia {
-        return Err("new document is not an adeia".into());
-    }
-    let edition = current.edition.saturating_add(1).max(next.edition);
-    next.edition = edition;
-    next.prev_hash = Some(hdap_core::crypto::sha256_hex(current_adeia.as_bytes()));
-    if next.created_at == 0 {
-        next.created_at = now;
-    }
-    let properties = identity.signed_prosopeion_doc().render();
-    let adeia = next.render();
-    let payload =
-        hdap_core::house_move_payload(&identity.global_id(), new_pyle, &properties, &adeia);
-    let signature = hdap_core::sig_to_b64(&identity.sign_bytes(payload.as_bytes()));
-    Ok(serde_json::json!({
-        "properties": properties,
-        "adeia": adeia,
-        "new_pyle": new_pyle,
-        "signature": signature,
-    })
-    .to_string()
-    .into_bytes())
-}
-
-fn post_house_move(client: &HttpClient, token: &str, body: &[u8]) -> Result<u64, String> {
-    let resp = client
-        .post_with_token(
-            "/house_move",
-            &std::collections::BTreeMap::new(),
-            token,
-            body,
-        )
-        .map_err(|e| e.to_string())?;
-    let v: serde_json::Value = serde_json::from_slice(&resp.body).map_err(|e| e.to_string())?;
-    if !(200..300).contains(&resp.status) {
-        return Err(v["error"]
-            .as_str()
-            .map(str::to_string)
-            .unwrap_or_else(|| format!("house_move {}", resp.status)));
-    }
-    v["adeia_edition"]
-        .as_u64()
-        .ok_or_else(|| "house_move response has no edition".to_string())
-}
-
-/// `POST /resolve_hash` -> the cached/local location and provenance flag.
-fn fetch_hash_lookup(client: &HttpClient, token: &str, body: &[u8]) -> Result<HashLookup, String> {
-    let resp = client
-        .post_with_token(
-            "/resolve_hash",
-            &std::collections::BTreeMap::new(),
-            token,
-            body,
-        )
-        .map_err(|e| e.to_string())?;
-    let v: serde_json::Value = serde_json::from_slice(&resp.body).map_err(|e| e.to_string())?;
-    if !(200..300).contains(&resp.status) {
-        return Err(v["error"]
-            .as_str()
-            .map(str::to_string)
-            .unwrap_or_else(|| format!("resolve_hash {}", resp.status)));
-    }
-    Ok(HashLookup {
-        status: v["status"].as_str().unwrap_or("unknown").to_string(),
-        owner: v["owner"].as_str().unwrap_or("").to_string(),
-        path: v["path"].as_str().unwrap_or("").to_string(),
-        source: v["source"]
-            .as_str()
-            .or_else(|| v["origin"]["server"].as_str())
-            .unwrap_or("")
-            .to_string(),
-        verified: v["verified"].as_bool().unwrap_or(false),
-        holders: v["holders"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|x| x.as_str().map(str::to_string))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        error: String::new(),
-    })
-}
-
-/// Parse `GET /bubble` into the summary + peer rows.
-fn fetch_bubble(client: &HttpClient, token: &str) -> Result<BubbleStatus, String> {
-    let resp = client
-        .get_with_token("/bubble", &std::collections::BTreeMap::new(), token)
-        .map_err(|e| e.to_string())?;
-    if !(200..300).contains(&resp.status) {
-        return Err(format!("bubble status {}", resp.status));
-    }
-    let v: serde_json::Value = serde_json::from_slice(&resp.body).map_err(|e| e.to_string())?;
-    let counts = &v["counts"];
-    let mut peers = Vec::new();
-    for p in v["peers"].as_array().cloned().unwrap_or_default() {
-        peers.push(BubblePeer {
-            node_id: p["node_id"].as_str().unwrap_or("").to_string(),
-            endpoint: p["endpoint"].as_str().unwrap_or("").to_string(),
-            tier: p["tier"].as_str().unwrap_or("untrusted").to_string(),
-            verified: p["verified"].as_bool().unwrap_or(false),
-            failures: p["failures"].as_u64().unwrap_or(0) as u32,
-            last_seen: p["last_seen"].as_u64().unwrap_or(0),
-        });
-    }
-    Ok(BubbleStatus {
-        total: counts["total"].as_u64().unwrap_or(peers.len() as u64) as usize,
-        core: counts["core"].as_u64().unwrap_or(0) as usize,
-        extended: counts["extended"].as_u64().unwrap_or(0) as usize,
-        untrusted: counts["untrusted"].as_u64().unwrap_or(0) as usize,
-        peers,
-    })
 }
 
 #[cfg(test)]

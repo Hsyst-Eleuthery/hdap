@@ -8,6 +8,7 @@
 //! left alone rather than being clobbered with garbage.
 
 use crate::app::App;
+use crate::state::ToastKind;
 use egui::{Color32, RichText};
 use hdap_core::doc::{self, Doc, DocType};
 use hdap_core::protocol::{DiadosiDoc, Permission, PrytaneionDoc, Right, Scope};
@@ -640,7 +641,7 @@ pub fn open(app: &mut App, path: &str) {
                 &format!("{e}"),
             ));
             app.notify(
-                crate::app::ToastKind::Error,
+                ToastKind::Error,
                 crate::i18n::fill2(app.strings.m_open_fail, path, &format!("{e}")),
             );
         }
@@ -656,10 +657,7 @@ pub fn save(app: &mut App) {
     };
     if app.read_only() {
         app.say(app.strings.m_ro_save.to_string());
-        app.notify(
-            crate::app::ToastKind::Error,
-            app.strings.m_ro_save.to_string(),
-        );
+        app.notify(ToastKind::Error, app.strings.m_ro_save.to_string());
         return;
     }
     let Some(token) = app.session_token() else {
@@ -715,10 +713,7 @@ pub fn save(app: &mut App) {
                 &saved_path,
                 &hash[..hash.len().min(16)],
             ));
-            app.notify(
-                crate::app::ToastKind::Success,
-                app.strings.m_cfg_saved.to_string(),
-            );
+            app.notify(ToastKind::Success, app.strings.m_cfg_saved.to_string());
         }
         Err(e) => {
             // Uploading costs band, and "insufficient band credit" is not
@@ -731,7 +726,7 @@ pub fn save(app: &mut App) {
             let detail = format!("{e}{hint}");
             let msg = crate::i18n::fill2(app.strings.m_save_fail, &state.path, &detail);
             app.say(msg.clone());
-            app.notify(crate::app::ToastKind::Error, msg);
+            app.notify(ToastKind::Error, msg);
         }
     }
 }

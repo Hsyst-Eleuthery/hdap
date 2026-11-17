@@ -1,5 +1,6 @@
-use crate::app::{App, SortKey, Toast, ToastKind};
+use crate::app::{App, SortKey};
 use crate::i18n::{fill1, fill2, fill4};
+use crate::state::{PowState, PreviewContentType, Toast, ToastKind};
 use egui::{Align, Align2, Color32, RichText};
 use image;
 use std::sync::atomic::Ordering;
@@ -145,7 +146,7 @@ fn render_toasts(ui: &mut egui::Ui, now: f64, app: &mut App) {
 }
 
 /// Compute progress stats for a PoW that is still running.
-fn pow_stats(pow: &crate::app::PowState) -> (u64, f64, f64) {
+fn pow_stats(pow: &PowState) -> (u64, f64, f64) {
     let attempts = pow.attempts.load(Ordering::Relaxed);
     let elapsed_s = pow.started.elapsed().as_secs_f64().max(0.001);
     let rate = attempts as f64 / elapsed_s;
@@ -234,7 +235,7 @@ fn render_preview_modal(ui: &mut egui::Ui, app: &mut App) {
         ui.label(RichText::new(&preview.path).small().weak());
         ui.add_space(4.0);
         match preview.content_type {
-            crate::app::PreviewContentType::Text => {
+            PreviewContentType::Text => {
                 let mut text = String::from_utf8_lossy(&preview.data).to_string();
                 egui::ScrollArea::both().show(ui, |ui| {
                     ui.add_sized(
@@ -245,7 +246,7 @@ fn render_preview_modal(ui: &mut egui::Ui, app: &mut App) {
                     );
                 });
             }
-            crate::app::PreviewContentType::Image => {
+            PreviewContentType::Image => {
                 if let Ok(image) = image::load_from_memory(&preview.data) {
                     let rgba = image.to_rgba8();
                     let size = [rgba.width() as usize, rgba.height() as usize];
@@ -268,7 +269,7 @@ fn render_preview_modal(ui: &mut egui::Ui, app: &mut App) {
                     ui.label(format!("⚠ {}", app.strings.preview_image_error));
                 }
             }
-            crate::app::PreviewContentType::Audio => {
+            PreviewContentType::Audio => {
                 ui.label(app.strings.preview_audio_not_supported);
                 ui.add_space(8.0);
                 if ui.button(app.strings.download).clicked() {
@@ -280,7 +281,7 @@ fn render_preview_modal(ui: &mut egui::Ui, app: &mut App) {
                     }
                 }
             }
-            crate::app::PreviewContentType::Unknown => {
+            PreviewContentType::Unknown => {
                 ui.label(app.strings.preview_unknown);
                 ui.add_space(8.0);
                 if ui.button(app.strings.download).clicked() {

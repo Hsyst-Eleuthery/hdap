@@ -35,7 +35,7 @@
 //! rather than a half-applied one.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -296,6 +296,11 @@ pub struct Db {
     /// (hash, len) of each blob row as last written, so a flush only rewrites
     /// content that actually changed.
     blob_marks: Mutex<BTreeMap<String, (String, u64)>>,
+    /// Directory for out-of-band blob files (`<data>/objects/<hash>`). When
+    /// set, blobs are also written to individual files on disk so the OS page
+    /// cache can manage large content without inflating the SQLite BLOB.
+    /// Empty for in-memory databases.
+    blob_dir: PathBuf,
     /// When set, the real blob-encryption key lives in an external key file.
     /// `load` overrides the DB value with it and `flush` writes a redacted
     /// placeholder instead, so a stolen DB never includes the key.
@@ -332,6 +337,10 @@ impl Db {
             conn: Mutex::new(conn),
             marks: Mutex::new(BTreeMap::new()),
             blob_marks: Mutex::new(BTreeMap::new()),
+            blob_dir: path
+                .parent()
+                .map(|p| p.join("objects"))
+                .unwrap_or_else(|| PathBuf::from("objects")),
             master_key_override: master_key,
         };
         // Prime the blob marks from what is already on disk so the first
@@ -371,6 +380,7 @@ impl Db {
             conn: Mutex::new(conn),
             marks: Mutex::new(BTreeMap::new()),
             blob_marks: Mutex::new(BTreeMap::new()),
+            blob_dir: PathBuf::new(),
             master_key_override: master_key,
         })
     }
@@ -448,14 +458,22 @@ impl Db {
             let mut stmt = conn.prepare("SELECT k, hash, len, data FROM blobs")?;
             let mut rows = stmt.query([])?;
             while let Some(row) = rows.next()? {
-                blobs.insert(
-                    row.get::<_, String>(0)?,
-                    (
-                        row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)?,
-                        row.get::<_, Vec<u8>>(3)?,
-                    ),
-                );
+                let k: String = row.get(0)?;
+                let hash: String = row.get(1)?;
+                let len: i64 = row.get(2)?;
+                // Prefer the on-disk file copy so the OS page cache can manage
+                // large content without inflating the SQLite BLOB. Fall back
+                // to the BLOB for databases created before this change.
+                let data = if !self.blob_dir.as_os_str().is_empty() {
+                    let path = self.blob_dir.join(&hash);
+                    match std::fs::read(&path) {
+                        Ok(file_bytes) => file_bytes,
+                        Err(_) => row.get::<_, Vec<u8>>(3)?,
+                    }
+                } else {
+                    row.get::<_, Vec<u8>>(3)?
+                };
+                blobs.insert(k, (hash, len, data));
             }
         }
         let mut state = meta.into_state(blobs);
@@ -527,6 +545,27 @@ impl Db {
         )?;
         tx.commit()?;
 
+        // Also write each changed blob to an individual file on disk so the OS
+        // page cache can manage large content without inflating the SQLite
+        // BLOB. The SQLite row remains the source of truth for backward
+        // compatibility; the file is a secondary, faster-to-read copy. The
+        // file name is `<hash>` so the same content always maps to the same
+        // path, and `load` prefers the file when present.
+        if !self.blob_dir.as_os_str().is_empty() {
+            let _ = std::fs::create_dir_all(&self.blob_dir);
+            for (_, b) in &blob_writes {
+                let path = self.blob_dir.join(&b.hash);
+                let _ = std::fs::write(&path, &b.bytes);
+            }
+            // Remove on-disk copies of deleted blobs (best effort). The hash
+            // is still in `blob_marks` until we clear it below.
+            for k in &blob_deletes {
+                if let Some((hash, _)) = blob_marks.get(*k) {
+                    let _ = std::fs::remove_file(self.blob_dir.join(hash));
+                }
+            }
+        }
+
         marks.insert("state".to_string(), meta_mark);
         // Snapshot the writes before mutating: the vectors borrow `st`, and
         // holding two mutable borrows of `blob_marks` at once is a borrowck
@@ -545,7 +584,8 @@ impl Db {
         Ok(())
     }
 
-    /// Bytes on disk (blobs + metadata), for `/health` and for tests.
+    /// Bytes on disk (blobs + metadata + on-disk blob files), for `/health`
+    /// and for tests.
     pub fn size_bytes(&self) -> DbResult<u64> {
         let conn = self
             .conn
@@ -557,7 +597,17 @@ impl Db {
             [],
             |r| r.get(0),
         )?;
-        Ok(total as u64)
+        let mut total = total as u64;
+        if !self.blob_dir.as_os_str().is_empty() {
+            if let Ok(entries) = std::fs::read_dir(&self.blob_dir) {
+                for entry in entries.flatten() {
+                    if let Ok(meta) = entry.metadata() {
+                        total = total.saturating_add(meta.len());
+                    }
+                }
+            }
+        }
+        Ok(total)
     }
 
     /// Number of content rows, for tests that assert on durability.
