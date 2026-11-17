@@ -297,9 +297,7 @@ impl FederationModule {
         }
         // This peer now holds a replica of `owner`'s namespace: remember it so
         // a later delete can be pushed instead of leaving the copy orphaned.
-        node.state
-            .lock()
-            .unwrap()
+        node.lock_state()
             .watchers
             .entry(owner.clone())
             .or_default()
@@ -396,7 +394,12 @@ impl FederationModule {
         let nonce = req.headers.get("x-hdap-nonce")?.clone();
         let ts: i64 = req.headers.get("x-hdap-timestamp")?.parse().ok()?;
         let sig_b64 = req.headers.get("x-hdap-signature")?;
-        if (ts - now).abs() > self.cfg.fed_window_secs {
+        // Every protocol timestamp is a Unix-UTC second. Tolerance is a
+        // server-side policy, not a client-side timezone decision; the replay
+        // window remains independently enforced by the nonce map below.
+        let (ts_u64, now_u64) = (u64::try_from(ts).ok()?, node.now());
+        let tolerance = u64::try_from(self.cfg.time_tolerance_secs).unwrap_or(0);
+        if !hdap_core::clock_skew_within(ts_u64, now_u64, tolerance) {
             return None;
         }
         let sig = crate::node::sig_from_b64(sig_b64)?;

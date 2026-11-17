@@ -61,6 +61,15 @@ fn json_err(msg: &str) -> String {
     serde_json::json!({ "error": msg }).to_string()
 }
 
+/// Recover a poisoned auxiliary mutex instead of panicking the whole node.
+/// Panicking inside a worker thread must never take down the server.
+pub(crate) fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
 fn require_json(body: &[u8]) -> Result<serde_json::Value, Response> {
     serde_json::from_slice(body).map_err(|_| Response::json(400, json_err("invalid json body")))
 }

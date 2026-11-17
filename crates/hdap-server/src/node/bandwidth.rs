@@ -100,7 +100,11 @@ impl BandwidthModule {
         // Derive signing key from node_sign_seed in State
         let sign_key = ed25519_dalek::SigningKey::from_bytes(&st.node_sign_seed);
         let sig = hdap_core::crypto::ed25519_sign(&sign_key, canonical.as_bytes());
-        d.sigs.last_mut().unwrap().signature = hex::encode(sig.to_bytes());
+        if let Some(slot) = d.sigs.last_mut() {
+            slot.signature = hex::encode(sig.to_bytes());
+        } else {
+            return Response::json(500, json_err("cannot sign mochthos document"));
+        }
 
         // Determine the path for this .hdap.pow file
         let path = Self::next_pow_path(&st, &user_id);

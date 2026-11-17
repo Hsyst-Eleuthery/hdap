@@ -154,7 +154,7 @@ impl Default for DiscoveryModule {
 
 impl DiscoveryModule {
     fn enqueue(&self, job: Job) {
-        let mut jobs = self.jobs.lock().unwrap();
+        let mut jobs = crate::node::lock_recover(&self.jobs);
         if jobs.len() < MAX_JOBS {
             jobs.push_back(job);
         }
@@ -178,7 +178,7 @@ impl DiscoveryModule {
     pub(crate) fn enqueue_exchange(&self, peer_id: String) {
         // Collapse duplicates: anti-entropy and a fresh handshake often point
         // at the same peer in the same tick.
-        let mut jobs = self.jobs.lock().unwrap();
+        let mut jobs = crate::node::lock_recover(&self.jobs);
         let already = jobs
             .iter()
             .any(|j| matches!(j, Job::Exchange { peer_id: p } if p == &peer_id));
@@ -188,7 +188,7 @@ impl DiscoveryModule {
     }
 
     pub(crate) fn enqueue_ledger(&self, peer_id: String) {
-        let mut jobs = self.jobs.lock().unwrap();
+        let mut jobs = crate::node::lock_recover(&self.jobs);
         let already = jobs
             .iter()
             .any(|j| matches!(j, Job::Ledger { peer_id: p } if p == &peer_id));
@@ -198,7 +198,7 @@ impl DiscoveryModule {
     }
 
     fn enqueue_health(&self, peer_id: String) {
-        let mut jobs = self.jobs.lock().unwrap();
+        let mut jobs = crate::node::lock_recover(&self.jobs);
         let already = jobs
             .iter()
             .any(|j| matches!(j, Job::Health { peer_id: p } if p == &peer_id));
@@ -212,12 +212,12 @@ impl DiscoveryModule {
     /// callback `Verify` job is the only thing that may mark it verified or
     /// clear endpoint failures. An existing verified flag is preserved.
     pub(crate) fn record_seen(&self, node_id: &str, now: u64) {
-        let mut health = self.health.lock().unwrap();
+        let mut health = crate::node::lock_recover(&self.health);
         health.entry(node_id.to_string()).or_default().last_seen = now;
     }
 
     fn record_check(&self, node_id: &str, now: u64, ok: bool) {
-        let mut health = self.health.lock().unwrap();
+        let mut health = crate::node::lock_recover(&self.health);
         let h = health.entry(node_id.to_string()).or_default();
         h.last_checked = now;
         if ok {
@@ -231,7 +231,7 @@ impl DiscoveryModule {
     }
 
     fn seen_before(&self, event_id: &str, now: u64) -> bool {
-        let mut seen = self.seen.lock().unwrap();
+        let mut seen = crate::node::lock_recover(&self.seen);
         let cutoff = now.saturating_sub(SEEN_TTL_SECS);
         seen.retain(|_, ts| *ts >= cutoff);
         if seen.contains_key(event_id) {
@@ -252,12 +252,12 @@ impl DiscoveryModule {
 
     /// Local health snapshot, useful for diagnostics and tests.
     pub fn health_snapshot(&self) -> BTreeMap<String, PeerHealth> {
-        self.health.lock().unwrap().clone()
+        crate::node::lock_recover(&self.health).clone()
     }
 
     /// Expose the seen-set size for diagnostics/tests.
     pub fn seen_len(&self) -> usize {
-        self.seen.lock().unwrap().len()
+        crate::node::lock_recover(&self.seen).len()
     }
 
     /// Queue an exchange with every known pyle. Used by tests and by an
@@ -274,7 +274,7 @@ impl DiscoveryModule {
     pub(crate) fn run_tick(&self, node: &Node, now: u64) {
         let mut modified = false;
         for _ in 0..8 {
-            let job = self.jobs.lock().unwrap().pop_front();
+            let job = crate::node::lock_recover(&self.jobs).pop_front();
             let Some(job) = job else { break };
             match job {
                 Job::Verify {
@@ -606,9 +606,7 @@ pub(crate) fn ingest_directory(
             continue;
         }
         let known = node
-            .state
-            .lock()
-            .unwrap()
+            .lock_state()
             .peers
             .get(&advert.node_id)
             .map(|p| p.sign_pub_hex == advert.sign_pub_hex)

@@ -59,7 +59,10 @@ impl IdentityModule {
         if sign_pub_bytes.len() != 32 {
             return Response::json(400, json_err("sign_pubkey must be 32 bytes"));
         }
-        let sign_pub: [u8; 32] = sign_pub_bytes.as_slice().try_into().unwrap();
+        let sign_pub: [u8; 32] = match sign_pub_bytes.as_slice().try_into() {
+            Ok(key) => key,
+            Err(_) => return Response::json(400, json_err("invalid sign_pubkey length")),
+        };
         // Find the signature in the document
         let sig_field = match doc.sigs.first() {
             Some(s) => s,
@@ -73,7 +76,10 @@ impl IdentityModule {
         if sig_bytes.len() != 64 {
             return Response::json(400, json_err("invalid signature format"));
         }
-        let sig_arr: [u8; 64] = sig_bytes.as_slice().try_into().unwrap();
+        let sig_arr: [u8; 64] = match sig_bytes.as_slice().try_into() {
+            Ok(sig) => sig,
+            Err(_) => return Response::json(400, json_err("invalid signature length")),
+        };
         let sig = Ed25519Signature::from_bytes(&sig_arr);
         // Compute signature input (canonical document without our signature).
         // The signature must stay in the list: `signature_input` omits that
@@ -665,7 +671,10 @@ impl IdentityModule {
                 json_err("sign_pubkey must be 32 bytes"),
             ));
         }
-        let sign_pub: [u8; 32] = sign_pub_bytes.as_slice().try_into().unwrap();
+        let sign_pub: [u8; 32] = match sign_pub_bytes.as_slice().try_into() {
+            Ok(key) => key,
+            Err(_) => return Err(Response::json(400, json_err("invalid sign_pubkey length"))),
+        };
         let sig_field = match doc.sigs.first() {
             Some(s) => s,
             None => {
@@ -683,7 +692,10 @@ impl IdentityModule {
         if sig_bytes.len() != 64 {
             return Err(Response::json(400, json_err("invalid signature format")));
         }
-        let sig_arr: [u8; 64] = sig_bytes.as_slice().try_into().unwrap();
+        let sig_arr: [u8; 64] = match sig_bytes.as_slice().try_into() {
+            Ok(sig) => sig,
+            Err(_) => return Err(Response::json(400, json_err("invalid signature length"))),
+        };
         let sig = Ed25519Signature::from_bytes(&sig_arr);
         let input = match doc.signature_input(0) {
             Ok(i) => i,

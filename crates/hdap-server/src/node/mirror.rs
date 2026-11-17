@@ -654,9 +654,7 @@ impl MirrorModule {
             endpoint,
             tls_pin,
         };
-        node.state
-            .lock()
-            .unwrap()
+        node.lock_state()
             .peers
             .insert(pyle.to_string(), peer.clone());
         if let Some(peers) = reply

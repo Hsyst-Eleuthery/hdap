@@ -58,7 +58,10 @@ impl StorageModule {
         if sphragis_bytes.len() != 64 {
             return Response::json(400, json_err("invalid sphragis signature length"));
         }
-        let sphragis: [u8; 64] = sphragis_bytes.as_slice().try_into().unwrap();
+        let sphragis: [u8; 64] = match sphragis_bytes.as_slice().try_into() {
+            Ok(sig) => sig,
+            Err(_) => return Response::json(400, json_err("invalid sphragis signature length")),
+        };
         let sphragis = Ed25519Signature::from_bytes(&sphragis);
         let Some(owner_pub) = node
             .lock_state()

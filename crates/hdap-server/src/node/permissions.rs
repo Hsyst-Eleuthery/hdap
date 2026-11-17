@@ -44,7 +44,10 @@ impl PermissionsModule {
                     if sig_bytes.len() != 64 {
                         return Response::json(400, json_err("invalid signature length"));
                     }
-                    let sig_arr: [u8; 64] = sig_bytes.as_slice().try_into().unwrap();
+                    let sig_arr: [u8; 64] = match sig_bytes.as_slice().try_into() {
+                        Ok(sig) => sig,
+                        Err(_) => return Response::json(400, json_err("invalid signature length")),
+                    };
                     let sig = Ed25519Signature::from_bytes(&sig_arr);
                     // Compute signature input before clearing signatures (the function
                     // requires the signature to be present at the given index).
@@ -55,9 +58,7 @@ impl PermissionsModule {
                         }
                     };
                     let owner_pub = match node
-                        .state
-                        .lock()
-                        .unwrap()
+                        .lock_state()
                         .users
                         .get(&user_id)
                         .and_then(|u| u.sign_pub_bytes())
