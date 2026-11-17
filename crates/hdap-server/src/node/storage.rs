@@ -619,9 +619,9 @@ mod tests {
             query,
             headers,
             body: data,
-        peer: None,
+            peer: None,
         }
-}
+    }
 
     /// A refused upload must not charge the user: the moira quota is checked
     /// *before* the band debit, so a 413 leaves `choregia` untouched.
@@ -657,7 +657,7 @@ mod tests {
                 },
             );
             st.sessions.insert(
-                "tok".to_string(),
+                hdap_core::session_storage_key("tok"),
                 Session {
                     user_id: owner.to_string(),
                     exp: u64::MAX,

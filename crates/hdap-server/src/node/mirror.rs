@@ -1100,9 +1100,9 @@ mod tests {
                 query: BTreeMap::new(),
                 headers,
                 body: body.as_bytes().to_vec(),
-            peer: None,
+                peer: None,
             }
-}
+        }
 
         /// Populate `node` with a registered owner holding one blob, the way a
         /// real node would after register + upload.
@@ -1221,7 +1221,7 @@ mod tests {
             // A session on pyle-a (the user doing the browsing). It is the
             // owner themself, so the source lets us pull their whole space.
             node_a.lock_state().sessions.insert(
-                "tok".to_string(),
+                hdap_core::session_storage_key("tok"),
                 Session {
                     user_id: owner.to_string(),
                     exp: u64::MAX,
@@ -1279,7 +1279,7 @@ mod tests {
                 ..Config::default()
             });
             node.lock_state().sessions.insert(
-                "tok".to_string(),
+                hdap_core::session_storage_key("tok"),
                 Session {
                     user_id: "local_ffffffffffffffff".to_string(),
                     exp: u64::MAX,
@@ -1365,7 +1365,7 @@ mod tests {
                     },
                 );
                 st.sessions.insert(
-                    "tok".to_string(),
+                    hdap_core::session_storage_key("tok"),
                     Session {
                         user_id: owner.to_string(),
                         exp: u64::MAX,
@@ -1429,7 +1429,7 @@ mod tests {
             });
             node_a.lock_state().node_sign_seed = [9u8; 32];
             node_a.lock_state().sessions.insert(
-                "tok".to_string(),
+                hdap_core::session_storage_key("tok"),
                 Session {
                     user_id: owner.to_string(),
                     exp: u64::MAX,
@@ -1495,7 +1495,7 @@ mod tests {
             });
             node_a.lock_state().node_sign_seed = [9u8; 32];
             node_a.lock_state().sessions.insert(
-                "tok".to_string(),
+                hdap_core::session_storage_key("tok"),
                 Session {
                     user_id: owner.to_string(),
                     exp: u64::MAX,
@@ -1551,9 +1551,9 @@ mod tests {
                 query,
                 headers,
                 body: Vec::new(),
-            peer: None,
+                peer: None,
             }
-}
+        }
 
         fn delete_ktema(owner: &str, path: &str, token: &str) -> Request {
             let mut req = get_ktema(owner, path, token);
@@ -1608,14 +1608,14 @@ mod tests {
             {
                 let mut st = node_a.lock_state();
                 st.sessions.insert(
-                    "tokg".to_string(),
+                    hdap_core::session_storage_key("tokg"),
                     Session {
                         user_id: guest.to_string(),
                         exp: u64::MAX,
                     },
                 );
                 st.sessions.insert(
-                    "toks".to_string(),
+                    hdap_core::session_storage_key("toks"),
                     Session {
                         user_id: stranger.to_string(),
                         exp: u64::MAX,
@@ -1705,7 +1705,7 @@ mod tests {
             });
             node_a.lock_state().node_sign_seed = [9u8; 32];
             node_a.lock_state().sessions.insert(
-                "tok".to_string(),
+                hdap_core::session_storage_key("tok"),
                 Session {
                     user_id: guest.to_string(),
                     exp: u64::MAX,
@@ -1758,7 +1758,7 @@ mod tests {
                 let mut st = node_b.lock_state();
                 st.node_sign_seed = [7u8; 32];
                 st.sessions.insert(
-                    "tok_o".to_string(),
+                    hdap_core::session_storage_key("tok_o"),
                     Session {
                         user_id: owner.to_string(),
                         exp: u64::MAX,
@@ -1791,7 +1791,7 @@ mod tests {
             });
             node_a.lock_state().node_sign_seed = [9u8; 32];
             node_a.lock_state().sessions.insert(
-                "tokg".to_string(),
+                hdap_core::session_storage_key("tokg"),
                 Session {
                     user_id: guest.to_string(),
                     exp: u64::MAX,
@@ -1886,7 +1886,7 @@ mod tests {
             });
             node_a.lock_state().node_sign_seed = [9u8; 32];
             node_a.lock_state().sessions.insert(
-                "tokg".to_string(),
+                hdap_core::session_storage_key("tokg"),
                 Session {
                     user_id: guest.to_string(),
                     exp: u64::MAX,
@@ -2002,7 +2002,7 @@ mod tests {
                 },
             );
             node_a.lock_state().sessions.insert(
-                "tok".to_string(),
+                hdap_core::session_storage_key("tok"),
                 Session {
                     user_id: owner.to_string(),
                     exp: u64::MAX,

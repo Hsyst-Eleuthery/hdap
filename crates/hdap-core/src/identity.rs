@@ -1,9 +1,7 @@
 //! Global identity: a single `nickname_<sufixo>` per user, independent of
 //! any server, anchored in `prosopeion.hdap` (especificacao-hdap.md §3-§4).
 
-use crate::crypto::{
-    ed25519_keygen, otp_chain, x25519_keygen, x25519_public, CryptoError, CryptoResult,
-};
+use crate::crypto::{ed25519_keygen, x25519_keygen, x25519_public, CryptoError, CryptoResult};
 use crate::doc::{Doc, DocType};
 use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
 use rand_core::{OsRng, RngCore};
@@ -185,7 +183,7 @@ impl Identity {
         let sign_key = ed25519_keygen(&mut rng);
         let enc_secret = x25519_keygen(&mut rng);
         let otp_k = 1024;
-        let (anchor, _) = otp_chain(&sha256ed(&sign_key), otp_k);
+        let (anchor, _) = crate::auth::make_otp_chain(&sha256ed(&sign_key), otp_k);
 
         Identity {
             nickname: nickname.to_string(),

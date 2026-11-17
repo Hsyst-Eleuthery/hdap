@@ -7,8 +7,8 @@
 
 use base64::Engine;
 use hdap_core::auth::{
-    derive_shared_key, prove_session_secret_bound, session_token, verify_knowledge_bounded,
-    verify_possession, OtpWitness,
+    derive_shared_key, prove_session_secret_bound, session_storage_key, session_token,
+    verify_knowledge_bounded, verify_possession, OtpWitness,
 };
 use hdap_core::pow::verify_pow;
 use hdap_core::time::{client_ts_matches, is_expired};
@@ -122,8 +122,7 @@ impl AuthModule {
         }
         // Drop expired challenges and cap the outstanding ones per user before
         // inserting, so an unauthenticated caller cannot grow the map forever.
-        st.proklesis
-            .retain(|_, r| !is_expired(ts, r.expires_at));
+        st.proklesis.retain(|_, r| !is_expired(ts, r.expires_at));
         let outstanding = st
             .proklesis
             .values()
@@ -287,7 +286,11 @@ impl AuthModule {
                 return Response::json(400, json_err("missing pylaia nonce"));
             }
             let challenge_text = pylaia_challenge(&self.cfg.server_id, &nonce);
-            if !verify_pow(challenge_text.as_bytes(), pylaia_nonce, self.cfg.pylaia_target) {
+            if !verify_pow(
+                challenge_text.as_bytes(),
+                pylaia_nonce,
+                self.cfg.pylaia_target,
+            ) {
                 return Response::json(401, json_err("pylaia proof-of-work not satisfied"));
             }
         }
@@ -306,9 +309,12 @@ impl AuthModule {
                 return Response::json(401, json_err("factor 2 step replayed"));
             }
             st.proklesis.remove(&nonce);
-            st.omphalos_step.insert(user_id.clone(), step.saturating_add(1));
+            st.omphalos_step
+                .insert(user_id.clone(), step.saturating_add(1));
+            // Store only a one-way hash: a DB dump must not contain a usable
+            // bearer token (v2/Teleios).
             st.sessions.insert(
-                token.clone(),
+                session_storage_key(&token),
                 Session {
                     user_id: user_id.clone(),
                     exp,
@@ -416,10 +422,10 @@ pub fn prune_expired(st: &mut State, now: u64) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::omphalos_rotation_text;
+    use super::*;
     use crate::node::Node;
-    use hdap_core::auth::{make_otp_chain, prove_session_secret_bound, prove_possession};
+    use hdap_core::auth::{make_otp_chain, prove_possession, prove_session_secret_bound};
     use std::collections::BTreeMap;
 
     fn auth_req(body: serde_json::Value) -> Request {
@@ -486,7 +492,7 @@ mod tests {
             },
         );
         st.sessions.insert(
-            "tok".into(),
+            hdap_core::session_storage_key("tok"),
             Session {
                 user_id: "u".into(),
                 exp: 9,
@@ -525,10 +531,7 @@ mod tests {
         use rand_core::OsRng;
         let user_enc = x25519_keygen(&mut OsRng);
         let node_enc = x25519_keygen(&mut OsRng);
-        let k = derive_shared_key(
-            &node_enc,
-            &hdap_core::crypto::x25519_public(&user_enc),
-        );
+        let k = derive_shared_key(&node_enc, &hdap_core::crypto::x25519_public(&user_enc));
         let challenge = hdap_core::Challenge {
             nonce: "n1".into(),
             ts: 1_700_000_000,

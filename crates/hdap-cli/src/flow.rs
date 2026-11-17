@@ -12,9 +12,10 @@ use ed25519_dalek::Signer;
 use serde_json::{json, Value};
 
 use hdap_core::auth::{
-    derive_shared_key, prove_knowledge, prove_possession, prove_session_secret, Challenge,
+    derive_shared_key, make_otp_chain, prove_knowledge, prove_possession,
+    prove_session_secret_bound, Challenge,
 };
-use hdap_core::crypto::{otp_chain, sha256, CryptoError};
+use hdap_core::crypto::{sha256, CryptoError};
 use hdap_core::doc::{parse as parse_doc, ParseError, Signature};
 use hdap_core::identity::Identity;
 use hdap_core::pow::solve_pow_rand;
@@ -166,15 +167,21 @@ pub fn authenticate(
     let signature_b64 = base64::engine::general_purpose::STANDARD.encode(sig.to_bytes());
 
     // Factor 2: OTP knowledge.
+    // v2/Teleios: the chain root is HKDF-derived from the identity seed, not
+    // the raw seed. The server verifies only against the registered anchor,
+    // and the client must rebuild the exact same preimages.
     let seed = sha256(&identity.sign_key.to_bytes());
-    let (_, chain) = otp_chain(&seed, identity.otp_k);
+    let (_, chain) = make_otp_chain(&seed, identity.otp_k);
     let witness = prove_knowledge(&chain, otp_step)
         .ok_or_else(|| FlowError::Proto("otp step out of range".into()))?;
     let otp_proof_b64 = base64::engine::general_purpose::STANDARD.encode(&witness.proof);
 
-    // Factor 3: k = X25519(user_enc_priv, node_enc_pub), then HMAC-prove it.
+    // Factor 3: k = HKDF(X25519(user_enc_priv, node_enc_pub)), proved over the
+    // exact challenge text the server issued (nonce + UTC ts). The client never
+    // substitutes a local timestamp, so timezone differences cannot cause a
+    // "factor 3 failed" error.
     let k = derive_shared_key(&identity.enc_secret, &node_enc_pub_bytes);
-    let code_proof = prove_session_secret(&k, user_id, &server_id, ts);
+    let code_proof = prove_session_secret_bound(&k, user_id, &server_id, &ch.canonical_text());
 
     // Entry toll (`pylaia`, §7.4). The node ships the challenge with the
     // `proklesis`, bound to its nonce, so this is fresh work per login and

@@ -433,10 +433,7 @@ pub fn serve_with_limit(
         if !limiter.acquire() {
             let _ = write_response(
                 &mut stream,
-                &Response::json(
-                    503,
-                    json_err_static("connection limit reached"),
-                ),
+                &Response::json(503, json_err_static("connection limit reached")),
             );
             continue;
         }
@@ -481,13 +478,7 @@ pub fn serve_tls(
     tls: std::sync::Arc<rustls::ServerConfig>,
     handle: impl Fn(Request) -> Response + Send + Sync + 'static,
 ) -> io::Result<()> {
-    serve_tls_with_limit(
-        listener,
-        max_body,
-        tls,
-        ConnectionLimiter::new(256),
-        handle,
-    )
+    serve_tls_with_limit(listener, max_body, tls, ConnectionLimiter::new(256), handle)
 }
 
 /// Like [`serve_tls`], with an explicit connection ceiling.

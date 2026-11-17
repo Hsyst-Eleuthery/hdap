@@ -314,7 +314,7 @@ mod tests {
                 },
             );
             st.sessions.insert(
-                "tok".to_string(),
+                hdap_core::session_storage_key("tok"),
                 Session {
                     user_id: user_id.to_string(),
                     exp: u64::MAX,
@@ -333,9 +333,9 @@ mod tests {
             query: std::collections::BTreeMap::new(),
             headers,
             body: body.as_bytes().to_vec(),
-        peer: None,
+            peer: None,
         }
-}
+    }
 
     fn sign_adeia(node: &Node, owner: &str, text: &str) -> String {
         let seed = node.lock_state().node_sign_seed;

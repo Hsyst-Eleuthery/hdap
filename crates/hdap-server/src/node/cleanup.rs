@@ -52,7 +52,7 @@ mod tests {
                 },
             );
             st.sessions.insert(
-                "t".into(),
+                hdap_core::session_storage_key("t"),
                 Session {
                     user_id: "u".into(),
                     exp: 90,

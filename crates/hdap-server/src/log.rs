@@ -17,7 +17,11 @@ pub const DEBUG: u8 = 4;
 
 /// Initialize from `HDAP_LOG`. Safe to call more than once.
 pub fn init() {
-    let level = match std::env::var("HDAP_LOG").unwrap_or_default().to_ascii_lowercase().as_str() {
+    let level = match std::env::var("HDAP_LOG")
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "off" => OFF,
         "error" => ERROR,
         "warn" | "" => WARN,

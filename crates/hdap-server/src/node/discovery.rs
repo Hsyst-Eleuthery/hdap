@@ -947,7 +947,7 @@ mod tests {
                 .insert("pyle-ext".into(), record("pyle-ext", "127.0.0.1:9002"));
             st.peers.insert("pyle-bad".into(), record("pyle-bad", ""));
             st.sessions.insert(
-                "tok".into(),
+                hdap_core::session_storage_key("tok"),
                 crate::store::Session {
                     user_id: "jose_0123456789abcdef".into(),
                     exp: u64::MAX,
@@ -966,8 +966,8 @@ mod tests {
             query: Default::default(),
             headers,
             body: Vec::new(),
-                peer: None,
-};
+            peer: None,
+        };
         let resp = node.discovery.handle_bubble(&node, &req);
         assert_eq!(resp.status, 200);
         let v: Value = serde_json::from_slice(&resp.body).unwrap();
@@ -1012,8 +1012,8 @@ mod tests {
             query: BTreeMap::from([("digest".to_string(), digest.clone())]),
             headers: BTreeMap::new(),
             body: Vec::new(),
-                peer: None,
-};
+            peer: None,
+        };
         let resp = a.discovery.handle_directory(&a, &req);
         assert_eq!(resp.status, 200);
         let body: Value = serde_json::from_slice(&resp.body).unwrap();

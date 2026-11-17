@@ -430,8 +430,11 @@ impl Node {
                 .get("authorization")
                 .and_then(|v| v.strip_prefix("Bearer ").map(|s| s.to_string()))
         })?;
+        // v2 stores only a one-way hash of the token, so the DB never carries
+        // a replayable credential. Legacy plaintext rows are migrated on load.
+        let key = hdap_core::session_storage_key(&token);
         let st = self.lock_state();
-        let sess = st.sessions.get(&token)?;
+        let sess = st.sessions.get(&key)?;
         if is_expired(self.now(), sess.exp) {
             return None;
         }
@@ -757,9 +760,9 @@ mod tests {
             query: BTreeMap::new(),
             headers: BTreeMap::new(),
             body: Vec::new(),
-        peer: None,
+            peer: None,
         }
-}
+    }
 
     /// Scenario B: a new `adeia` edition (or a house move) must not take an
     /// already public replica offline. The frozen snapshot keeps serving old

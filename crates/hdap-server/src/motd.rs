@@ -85,7 +85,12 @@ pub fn render(template: &str, ctx: &MotdContext) -> String {
         }
         if template[i..].starts_with("HDAP{") {
             if let Some(end) = template[i + 5..].find('}') {
-                let tag = &template[i + 5..i + 5 + end];
+                let inner = &template[i + 5..i + 5 + end];
+                // Canonical form is `HDAP{[tag]}`; also accept bare `HDAP{tag}`.
+                let tag = inner
+                    .strip_prefix('[')
+                    .and_then(|s| s.strip_suffix(']'))
+                    .unwrap_or(inner);
                 match ctx.tag(tag) {
                     Some(value) => out.push_str(&value),
                     None => {
@@ -112,7 +117,7 @@ pub fn human_duration(secs: u64) -> String {
     if days > 0 {
         format!("{days}d {hours:02}h {mins:02}m")
     } else if hours > 0 {
-        format!("{hours:02}h {mins:02}m")
+        format!("{hours}h {mins:02}m")
     } else {
         format!("{mins}m")
     }

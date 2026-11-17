@@ -137,6 +137,24 @@ pub fn session_token(k: &[u8], server_id: &str, exp: u64) -> String {
     ))
 }
 
+/// Key under which a session token is stored at rest (v2/Teleios).
+///
+/// The database must never contain the bearer credential itself: a dump or a
+/// backup then becomes a ready-to-use session. One-way hashing with a domain
+/// prefix means a stolen `sessions` map cannot be replayed as `X-HDAP-Token`.
+/// The prefix marks v2 keys so legacy v1 rows can be migrated on load.
+pub fn session_storage_key(token: &str) -> String {
+    format!(
+        "v2:{}",
+        sha256_hex(format!("hdap:session-store:{token}").as_bytes())
+    )
+}
+
+/// Whether a stored session key is already in the v2 one-way form.
+pub fn is_session_storage_key(key: &str) -> bool {
+    key.starts_with("v2:")
+}
+
 /// Derive the factor-3 shared key `k = X25519(local_enc_priv, peer_enc_pub)`.
 /// The node derives it from its own ENC secret key and the user's published
 /// ENC public key; the user derives it from its ENC secret key and the

@@ -755,9 +755,9 @@ mod tests {
                 .collect(),
             headers,
             body: Vec::new(),
-        peer: None,
+            peer: None,
         }
-}
+    }
 
     fn signed_fed_req(
         node_id: &str,
@@ -784,9 +784,9 @@ mod tests {
             query: BTreeMap::new(),
             headers,
             body: body.as_bytes().to_vec(),
-        peer: None,
+            peer: None,
         }
-}
+    }
 
     /// Idempotency must outlive the replay window: the `pheme`/`prytaneion`
     /// op-id guard is a separate, unpruned set, so a peer cannot re-apply the
@@ -828,10 +828,7 @@ mod tests {
             &signed_fed_req(peer_id, &seed, "n1", 1000, "/homospondoi/pheme", &body),
         );
         assert_eq!(r1.status, 200, "{}", String::from_utf8_lossy(&r1.body));
-        assert_eq!(
-            node.lock_state().pheme.get(target).copied(),
-            Some(5)
-        );
+        assert_eq!(node.lock_state().pheme.get(target).copied(), Some(5));
 
         // Time jumps well past the window: the next fed request prunes the
         // replay map, but must not forget that op-1 was already applied.
@@ -1147,8 +1144,8 @@ mod tests {
             query: BTreeMap::new(),
             headers: BTreeMap::new(),
             body: body.into_bytes(),
-                peer: None,
-};
+            peer: None,
+        };
         let r = node.federation.handle_fed(&node, &req);
         assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(&r.body));
         let st = node.lock_state();

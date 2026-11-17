@@ -21,7 +21,10 @@
 //!
 //! * `master_key` — every blob is sealed with it (`aead_seal`). A fresh key
 //!   per boot would turn the whole archive into unreadable bytes, so it is
-//!   generated once and then persisted like any other record.
+//!   generated once. In v2/Teleios it is stored in a separate, operator-owned
+//!   key file (`--master-key-file`); when configured, the DB row is redacted
+//!   so stealing the archive does not also steal the key. Legacy nodes without
+//!   a key file keep the v1 behaviour and emit a startup warning.
 //! * `mochthos_used` and `omphalos_step` — the replay guards. Losing them on
 //!   restart would let a mined band be farmed again and an OTP be replayed.
 //!
@@ -229,12 +232,28 @@ impl Meta {
             );
         }
 
+        // Migrate v1 plaintext session tokens to one-way storage keys. A token
+        // is a bearer credential: keeping it verbatim in the DB means a backup
+        // is a ready-to-use session. Hash on load; the next flush persists v2.
+        let sessions = self
+            .sessions
+            .into_iter()
+            .map(|(k, v)| {
+                let key = if hdap_core::is_session_storage_key(&k) {
+                    k
+                } else {
+                    hdap_core::session_storage_key(&k)
+                };
+                (key, v)
+            })
+            .collect();
+
         State {
             master_key,
             node_sign_seed,
             whoami: self.whoami,
             users: self.users,
-            sessions: self.sessions,
+            sessions,
             proklesis: self.proklesis,
             omphalos_step: self.omphalos_step,
             choregia: self.choregia,
@@ -277,11 +296,22 @@ pub struct Db {
     /// (hash, len) of each blob row as last written, so a flush only rewrites
     /// content that actually changed.
     blob_marks: Mutex<BTreeMap<String, (String, u64)>>,
+    /// When set, the real blob-encryption key lives in an external key file.
+    /// `load` overrides the DB value with it and `flush` writes a redacted
+    /// placeholder instead, so a stolen DB never includes the key.
+    master_key_override: Option<[u8; 32]>,
 }
 
 impl Db {
-    /// Open (creating if needed) the node database at `path`.
+    /// Open (creating if needed) the node database at `path`, with the
+    /// legacy in-DB master key. Prefer `open_with_master_key` on new nodes.
     pub fn open(path: &Path) -> DbResult<Db> {
+        Self::open_with_master_key(path, None)
+    }
+
+    /// Open the database with an externally managed master key. The value in
+    /// the DB (if any) is ignored on load and redacted on every flush.
+    pub fn open_with_master_key(path: &Path, master_key: Option<[u8; 32]>) -> DbResult<Db> {
         if let Some(dir) = path.parent() {
             if !dir.as_os_str().is_empty() {
                 std::fs::create_dir_all(dir).map_err(|e| {
@@ -302,6 +332,7 @@ impl Db {
             conn: Mutex::new(conn),
             marks: Mutex::new(BTreeMap::new()),
             blob_marks: Mutex::new(BTreeMap::new()),
+            master_key_override: master_key,
         };
         // Prime the blob marks from what is already on disk so the first
         // flush after a restart does not rewrite every stored byte.
@@ -322,6 +353,11 @@ impl Db {
 
     /// An in-memory database, for tests and for `--ephemeral`.
     pub fn open_memory() -> DbResult<Db> {
+        Self::open_memory_with_master_key(None)
+    }
+
+    /// In-memory database with an externally managed master key.
+    pub fn open_memory_with_master_key(master_key: Option<[u8; 32]>) -> DbResult<Db> {
         let conn = Connection::open_in_memory()?;
         conn.pragma_update(None, "journal_mode", "MEMORY")?;
         Self::init_schema(&conn)?;
@@ -329,7 +365,35 @@ impl Db {
             conn: Mutex::new(conn),
             marks: Mutex::new(BTreeMap::new()),
             blob_marks: Mutex::new(BTreeMap::new()),
+            master_key_override: master_key,
         })
+    }
+
+    /// Read just the persisted master key from an existing database, without
+    /// loading any blobs. Used once when migrating a v1 node to a key file.
+    /// Returns `None` for a fresh/absent DB or a redacted (all-zero) row.
+    pub fn peek_master_key(path: &Path) -> DbResult<Option<[u8; 32]>> {
+        if !path.exists() {
+            return Ok(None);
+        }
+        let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let raw: Option<Vec<u8>> = conn
+            .query_row("SELECT v FROM meta WHERE k = 'state'", [], |r| r.get(0))
+            .optional()?;
+        let Some(raw) = raw else {
+            return Ok(None);
+        };
+        #[derive(serde::Deserialize)]
+        struct KeyOnly {
+            #[serde(default)]
+            master_key: String,
+        }
+        let key: KeyOnly = serde_json::from_slice(&raw)
+            .map_err(|e| DbError::Corrupt(format!("estado ilegível: {e}")))?;
+        let decoded = hex::decode(&key.master_key)
+            .ok()
+            .and_then(|v| <[u8; 32]>::try_from(v).ok());
+        Ok(decoded.filter(|k| *k != [0u8; 32]))
     }
 
     fn init_schema(conn: &Connection) -> DbResult<()> {
@@ -385,14 +449,23 @@ impl Db {
                 );
             }
         }
-        Ok(Some(meta.into_state(blobs)))
+        let mut state = meta.into_state(blobs);
+        if let Some(key) = self.master_key_override {
+            state.master_key = key;
+        }
+        Ok(Some(state))
     }
 
     /// Mirror `st` into the database. One transaction; unchanged namespaces
     /// are skipped by fingerprint, and only content whose (hash, len) moved
     /// is rewritten.
     pub fn flush(&self, st: &State) -> DbResult<()> {
-        let meta = Meta::from_state(st);
+        let mut meta = Meta::from_state(st);
+        if self.master_key_override.is_some() {
+            // The key lives in the operator's key file. Persist a marker so a
+            // DB backup is useless without it; never the real key bytes.
+            meta.master_key = hex::encode([0u8; 32]);
+        }
         let raw = serde_json::to_vec(&meta)
             .map_err(|e| DbError::Corrupt(format!("estado não serializável: {e}")))?;
         let meta_mark = fingerprint(&raw);
@@ -512,7 +585,7 @@ mod tests {
             user("jose_0123456789abcdef"),
         );
         st.sessions.insert(
-            "tok".into(),
+            hdap_core::session_storage_key("tok"),
             Session {
                 user_id: "jose_0123456789abcdef".into(),
                 exp: 42,
@@ -953,6 +1026,76 @@ mod tests {
             );
             let _ = std::fs::remove_dir_all(&dir);
         }
+    }
+
+    /// v2: with an external key file the DB must never contain the real key,
+    /// yet a reopen with the same key must still decrypt every blob.
+    #[test]
+    fn external_master_key_is_never_written_to_the_db() {
+        let dir = tempdir("external-key");
+        let path = dir.join("node.db");
+        let key = [0x5au8; 32];
+
+        let mut st = State::default();
+        st.master_key = key;
+        {
+            let db = Db::open_with_master_key(&path, Some(key)).expect("open");
+            db.flush(&st).expect("flush");
+        }
+        assert_eq!(
+            Db::peek_master_key(&path).expect("peek"),
+            None,
+            "a redacted DB must not reveal the key"
+        );
+        {
+            let db = Db::open_with_master_key(&path, Some(key)).expect("reopen");
+            let back = db.load().expect("load").expect("state");
+            assert_eq!(back.master_key, key);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Legacy plaintext tokens are converted to one-way keys on load, so an
+    /// old backup cannot be replayed as a live session after upgrading.
+    #[test]
+    fn legacy_session_tokens_are_hashed_on_load() {
+        let dir = tempdir("session-migration");
+        let path = dir.join("node.db");
+        {
+            let db = Db::open(&path).expect("open");
+            // Write the v1 shape directly, bypassing today's `Meta::from_state`.
+            let mut meta = serde_json::json!({
+                "schema_version": SCHEMA_VERSION,
+                "master_key": hex::encode([1u8; 32]),
+                "node_sign_seed": hex::encode([2u8; 32]),
+                "whoami": "node-a",
+                "users": {},
+                "sessions": { "raw-bearer-token": { "user_id": "u", "exp": 42 } },
+                "proklesis": {}, "omphalos_step": {}, "choregia": {},
+                "stored": {}, "mochthos_used": [], "object_index": {},
+                "prytaneion": {}, "pheme": {}, "permissions": {}, "ceessions": {},
+                "kerux": {}, "kerux_owner": {}, "timi": {}, "peers": {}, "fed_nonces": {}
+            });
+            // Keep the JSON valid even if extra empty maps were dropped above.
+            meta.as_object_mut()
+                .unwrap()
+                .insert("band_objects".into(), serde_json::json!({}));
+            meta.as_object_mut()
+                .unwrap()
+                .insert("band_windows".into(), serde_json::json!({}));
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO meta (k, v) VALUES ('state', ?1)",
+                params![serde_json::to_vec(&meta).unwrap()],
+            )
+            .expect("seed");
+        }
+        let db = Db::open(&path).expect("reopen");
+        let st = db.load().expect("load").expect("state");
+        let expected = hdap_core::session_storage_key("raw-bearer-token");
+        assert!(st.sessions.contains_key(&expected));
+        assert!(!st.sessions.contains_key("raw-bearer-token"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn tempdir(tag: &str) -> std::path::PathBuf {

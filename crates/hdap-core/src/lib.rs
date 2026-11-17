@@ -20,10 +20,14 @@ pub const PROTOCOL_VERSION: u64 = 2;
 pub const PROTOCOL_CODENAME: &str = "Teleios";
 
 pub use auth::{
-    derive_shared_key, prove_session_secret, session_token, verify_knowledge_bounded,
-    verify_possession, AuthProof, Challenge, OtpWitness, SessionToken,
+    derive_shared_key, is_session_storage_key, prove_session_secret, prove_session_secret_bound,
+    session_storage_key, session_token, verify_knowledge_bounded, verify_possession, AuthProof,
+    Challenge, OtpWitness, SessionToken,
 };
-pub use crypto::{hkdf_sha256, seal_to_pub, sha256, sha256_hex, KDF_INFO_ECIES, KDF_INFO_OTP, KDF_INFO_SESSION, MAX_OTP_CHAIN_LEN};
+pub use crypto::{
+    hkdf_sha256, seal_to_pub, sha256, sha256_hex, KDF_INFO_ECIES, KDF_INFO_OTP, KDF_INFO_SESSION,
+    MAX_OTP_CHAIN_LEN,
+};
 pub use doc::{parse, Doc, DocType, ParseError, Signature, FORMAT_VERSION, MAGIC};
 pub use identity::{Identity, IDENTITY_USER_PREFIX};
 pub use pow::{solve_pow, verify_pow, PowProof};
@@ -34,6 +38,6 @@ pub use protocol::{
     TransferTarget, TRANSFER_KIND_ACCEPT, TRANSFER_KIND_REQUEST, TRANSFER_TARGET_DIR,
     TRANSFER_TARGET_FILE, TRANSFER_TARGET_IDENTITY,
 };
-pub use time::{clock_skew_within, client_ts_matches, is_expired, unix_secs_utc};
+pub use time::{client_ts_matches, clock_skew_within, is_expired, unix_secs_utc};
 pub use uri::parse_access_uri;
 pub use vault::{Vault, VaultSecrets};
