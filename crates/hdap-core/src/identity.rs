@@ -207,6 +207,31 @@ impl Identity {
         ))
     }
 
+    /// Rebuild an identity from a 32-byte recovery seed plus nickname.
+    ///
+    /// All key material is deterministically derived from `seed`:
+    /// - suffix: first 8 bytes of `seed`, hex-encoded
+    /// - sign key: Ed25519 signing key from `seed` bytes
+    /// - enc secret: X25519 static secret from `seed` bytes
+    /// - OTP anchor: chain from `sha256(seed)`, `k = 1024`
+    pub fn from_seed(nickname: &str, created_at: u64, seed: &[u8; 32]) -> Identity {
+        let suffix_hex = hex::encode(&seed[..8]);
+        let sign_key = ed25519_dalek::SigningKey::from_bytes(seed);
+        let enc_secret = x25519_dalek::StaticSecret::from(*seed);
+        let otp_k = 1024;
+        let (anchor, _) = crate::auth::make_otp_chain(&sha256_digest(seed), otp_k);
+
+        Identity {
+            nickname: nickname.to_string(),
+            suffix_hex,
+            sign_key,
+            enc_secret,
+            otp_k,
+            otp_anchor: anchor,
+            created_at,
+        }
+    }
+
     /// Rebuild the identity from a `prosopeion.hdap` doc + local secrets.
     pub fn from_doc(
         doc: &Doc,
@@ -374,6 +399,10 @@ impl Identity {
 
 fn sha256ed(key: &SigningKey) -> [u8; 32] {
     crate::crypto::sha256(&key.to_bytes())
+}
+
+fn sha256_digest(bytes: &[u8; 32]) -> [u8; 32] {
+    crate::crypto::sha256(bytes)
 }
 
 /// Parse the global id `nickname_sufixo` into its parts.

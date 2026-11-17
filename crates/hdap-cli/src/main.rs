@@ -13,7 +13,7 @@ use hdap_cli::{
     list_ktema, publish_alias, register, request_transfer, resolve, rotate_omphalos,
     transfer_inbox, transfer_owner, upload_with_band, HttpClient, Identity,
 };
-use hdap_core::crypto::sha256_hex;
+use hdap_core::{crypto::sha256_hex, RecoveryPhrase};
 
 const KRYPTE: &str = "krypte.hdap";
 const PROSOPEION: &str = "prosopeion.hdap";
@@ -45,7 +45,8 @@ fn print_usage() {
            --version       show version\n\
          \n\
          COMMANDS:\n  \
-           init NICKNAME            create identity\n  \
+           init NICKNAME            create identity (shows recovery phrase)\n  \
+           recover PHRASE NICKNAME  recover identity from a recovery phrase\n  \
            register                 register identity on the node\n  \
            auth                     login (3FA) and print token\n  \
            whoami                   print this identity's global id\n  \
@@ -204,6 +205,7 @@ fn main() {
     let tail: Vec<String> = rest[1..].to_vec();
     match cmd {
         "init" => cmd_init(&args, &tail),
+        "recover" => cmd_recover(&args, &tail),
         "register" => cmd_register(&args),
         "auth" => cmd_auth(&args),
         "whoami" => cmd_whoami(&args),
@@ -239,16 +241,59 @@ fn cmd_init(args: &CmdArgs, tail: &[String]) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let identity = Identity::try_generate(nickname, now).unwrap_or_else(|e| {
-        eprintln!("hdap-cli: invalid nickname: {e}");
-        std::process::exit(2);
-    });
+    // Derive the identity from a recovery phrase so the user can rebuild it
+    // from the phrase alone if krypte.hdap is lost.
+    let (recovery, seed) = RecoveryPhrase::generate();
+    let identity = Identity::from_seed(nickname, now, &seed);
     let (k, p) = identity_paths(&args.home);
     save(&identity, args.pass.as_bytes(), &k, &p).expect("failed to save identity");
     println!(
         "identity {} created; registered on a node with `register`",
         identity.global_id()
     );
+    println!();
+    println!("  RECOVERY PHRASE (write this down, keep it offline):");
+    println!("      {}", recovery.phrase());
+    println!("  With this phrase and your passphrase you can run:");
+    println!("      hdap-cli recover <PHRASE> <NICKNAME>");
+    println!();
+    eprintln!(
+        "hdap-cli: BACK UP NOW — copy `{}` to a second physical location and store the passphrase separately. \
+         There is no central recovery: losing the vault or the passphrase loses the identity. \
+         Your recovery phrase lets you rebuild the identity from the phrase alone.",
+        k.display()
+    );
+}
+
+fn cmd_recover(args: &CmdArgs, tail: &[String]) {
+    let phrase = tail.first().map(String::as_str).unwrap_or("");
+    let nickname = tail.get(1).map(String::as_str).unwrap_or("user");
+    if phrase.is_empty() {
+        eprintln!("hdap-cli: recover requires a recovery phrase (64 hex chars)");
+        std::process::exit(1);
+    }
+    let recovery = match RecoveryPhrase::from_hex(phrase) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("hdap-cli: invalid recovery phrase: {e:?}");
+            std::process::exit(2);
+        }
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let seed = *recovery.entropy;
+    let identity = Identity::from_seed(nickname, now, &seed);
+    let (k, p) = identity_paths(&args.home);
+    // Ask for a passphrase to seal the recovered vault.
+    let pass = if args.pass.is_empty() {
+        prompt_passphrase("identity passphrase")
+    } else {
+        args.pass.clone()
+    };
+    save(&identity, pass.as_bytes(), &k, &p).expect("failed to save identity");
+    println!("identity {} recovered from phrase", identity.global_id());
     eprintln!(
         "hdap-cli: BACK UP NOW — copy `{}` to a second physical location and store the passphrase separately. \
          There is no central recovery: losing the vault or the passphrase loses the identity.",

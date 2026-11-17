@@ -95,7 +95,7 @@ Honest limits: there is no central password recovery; metadata is public by desi
 
 ## Documentation
 
-The documentation is written in Portuguese. Start with [docs/VERSAO.md](docs/VERSAO.md) for the v2 overview, [docs/guia-1-introducao.md](docs/guia-1-introducao.md) for the user guide, [docs/tecnico.md](docs/tecnico.md) for architecture, [docs/especificacao-hdap.md](docs/especificacao-hdap.md) for normative semantics, [docs/rfc-hdap.md](docs/rfc-hdap.md) for the wire format, [docs/guia-de-execucao.md](docs/guia-de-execucao.md) for building and releasing, and [CHANGELOG.md](CHANGELOG.md) for history.
+Documentation is available in Portuguese and English. Start with [docs/VERSAO.md](docs/VERSAO.md) for the v2 overview, [docs/guia-1-introducao.en.md](docs/guia-1-introducao.en.md) for the user guide in English, [docs/tecnico.md](docs/tecnico.md) for architecture, [docs/especificacao-hdap.md](docs/especificacao-hdap.md) for normative semantics, [docs/rfc-hdap.md](docs/rfc-hdap.md) for the wire format, [docs/guia-de-execucao.md](docs/guia-de-execucao.md) for building and releasing, and [CHANGELOG.md](CHANGELOG.md) for history.
 
 ## Contact and codenames
 

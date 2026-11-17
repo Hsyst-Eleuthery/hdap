@@ -6,6 +6,7 @@ pub mod auth;
 pub mod crypto;
 pub mod doc;
 pub mod identity;
+pub mod mnemonic;
 pub mod pow;
 pub mod protocol;
 pub mod time;
@@ -30,6 +31,7 @@ pub use crypto::{
 };
 pub use doc::{parse, Doc, DocType, ParseError, Signature, FORMAT_VERSION, MAGIC};
 pub use identity::{Identity, IDENTITY_USER_PREFIX};
+pub use mnemonic::{RecoveryError, RecoveryPhrase};
 pub use pow::{solve_pow, verify_pow, PowProof};
 pub use protocol::{
     adeia_doc_with_diadosi, house_move_payload, sig_to_b64, transfer_payload, DiadosiDoc,

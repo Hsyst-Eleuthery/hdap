@@ -9,7 +9,7 @@
 use std::net::TcpListener;
 use std::process::ExitCode;
 
-use hdap_server::{Config, Node};
+use hdap_server::{config::FederationPeer, Config, Node};
 
 struct Args {
     listen: String,
@@ -19,6 +19,9 @@ struct Args {
     server_id: Option<String>,
     no_tls: bool,
     cfg: Config,
+    /// Pre-pinned federation peers passed via `--federation-peer` (repeatable).
+    /// Format: `node_id:pubkey:endpoint[:tls_pin]`.
+    federation_peers: Vec<(String, FederationPeer)>,
     /// Where the SQLite archive lives. Everything the node holds — accounts,
     /// sealed content, the band ledger and the replay guards — is in here.
     data_dir: String,
@@ -64,6 +67,7 @@ fn print_usage() {
            --max-challenges N  outstanding login challenges per user (default 4)\n  \
            --cleanup-interval N seconds between expiry purges; 0 disables (default 60)\n  \
            --time-tolerance N   federation clock-skew tolerance in seconds (default 300)\n  \
+           --federation-peer NODE:PUBKEY:ENDPOINT[:TLS_PIN]  pre-pin a federation peer\n  \
            --help               show usage\n  \
            --version            show version"
     );
@@ -83,6 +87,7 @@ fn parse_args() -> Args {
         ephemeral: false,
         advertise: None,
         cfg: Config::default(),
+        federation_peers: Vec::new(),
     };
     while let Some(flag) = args.next() {
         match flag.as_str() {
@@ -142,6 +147,25 @@ fn parse_args() -> Args {
             "--time-tolerance" => {
                 out.cfg.time_tolerance_secs = parse_value(&mut args, "--time-tolerance")
             }
+            "--federation-peer" => {
+                let spec = take_value(&mut args, "--federation-peer");
+                let mut parts = spec.splitn(4, ':');
+                let node_id = parts.next().unwrap_or("").to_string();
+                let pubkey = parts.next().unwrap_or("").to_string();
+                let endpoint = parts.next().unwrap_or("").to_string();
+                let tls_pin = parts.next().map(|s| s.to_string());
+                if node_id.is_empty() || pubkey.is_empty() || endpoint.is_empty() {
+                    panic!("invalid --federation-peer '{spec}': expected NODE:PUBKEY:ENDPOINT[:TLS_PIN]");
+                }
+                out.federation_peers.push((
+                    node_id,
+                    FederationPeer {
+                        pubkey,
+                        endpoint,
+                        tls_pin,
+                    },
+                ));
+            }
             "--help" | "-h" => {
                 print_usage();
                 std::process::exit(0);
@@ -152,6 +176,13 @@ fn parse_args() -> Args {
             }
             other => panic!("unknown flag `{other}`"),
         }
+    }
+
+    // Apply pre-pinned federation peers to the config.
+    for (node_id, peer) in &out.federation_peers {
+        out.cfg
+            .federation_peers
+            .insert(node_id.clone(), peer.clone());
     }
     out
 }

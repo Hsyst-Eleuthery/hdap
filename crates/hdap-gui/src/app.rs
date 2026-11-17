@@ -9,6 +9,7 @@ use hdap_cli::http_client::HttpClient;
 use hdap_cli::identity_store;
 use hdap_core::identity::{canonical_nickname, Identity};
 use hdap_core::pow::Canceller;
+use hdap_core::RecoveryPhrase;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 
@@ -716,19 +717,26 @@ impl App {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        // `try_generate` normalizes and rejects an absolute id pasted into the
-        // nickname box, so `nickname_suffix` can never end up doubled.
-        let id = Identity::try_generate(&self.nickname, created)
-            .map_err(|e| FlowError::Proto(format!("nickname inválido: {e}")))?;
+        // Derive the identity from a recovery phrase so the user can rebuild it
+        // from the phrase alone if krypte.hdap is lost.
+        let (recovery, seed) = RecoveryPhrase::generate();
+        let id = Identity::from_seed(&self.nickname, created, &seed);
         identity_store::save(&id, self.password.as_bytes(), &krypte, &pros)
             .map_err(|e| FlowError::Proto(format!("save identity: {e:?}")))?;
         self.identity = Some(id.clone());
-        // Guided backup prompt: there is no central recovery, so say it at the
-        // exact moment the vault is created instead of only in the docs.
-        self.say(
-            "⚠ Faça backup de krypte.hdap agora / Back up krypte.hdap now — \
-             sem o cofre e a senha não há recuperação / no recovery without the vault and passphrase",
+        // Guided backup prompt: show the recovery phrase at the exact moment
+        // the vault is created, so the user can write it down.
+        let msg = format!(
+            "⚠ FRASE DE RECUPERAÇÃO / RECOVERY PHRASE — escreva este texto e guarde-o off-line: \\
+             {} \\
+             Com ela e a senha você recria a identidade sem o krypte.hdap. \\
+             Write this recovery phrase down and keep it offline: \\
+             {} \\
+             With it and your passphrase you can rebuild the identity without krypte.hdap.",
+            recovery.phrase(),
+            recovery.phrase()
         );
+        self.say(msg);
         Ok(id)
     }
 
