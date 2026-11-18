@@ -1,6 +1,7 @@
 //! Federation module: peer handshake, sync, TCD (pheme), prytaneion updates.
 
 use hdap_core::crypto::{aead_open, ed25519_verify};
+use std::sync::atomic::Ordering;
 
 use crate::config::Config;
 use crate::http::{Request, Response};
@@ -421,6 +422,7 @@ impl FederationModule {
             return None;
         }
         st.fed_nonces.insert(key, now as u64);
+        node.nonce_consumed.store(true, Ordering::Relaxed);
         drop(st);
         node.discovery.record_seen(&peer.node_id, now as u64);
         Some(peer)

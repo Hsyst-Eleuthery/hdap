@@ -118,6 +118,10 @@ pub struct Node {
     lock_poisoned: AtomicBool,
     /// Unix UTC seconds when this process started (used by Ángelma uptime).
     started_at: u64,
+    /// Set when a factor-1 nonce was consumed by `fed_verify_peer`. Ensures
+    // the nonce consumption is persisted to disk even when the triggering
+    // request is a GET (which otherwise wouldn't trigger a flush).
+    nonce_consumed: AtomicBool,
 
     // Submodules
     auth: AuthModule,
@@ -167,6 +171,7 @@ impl Node {
             db: None,
             advertise_endpoint: None,
             lock_poisoned: AtomicBool::new(false),
+            nonce_consumed: AtomicBool::new(false),
             started_at: unix_secs_utc(),
             auth: AuthModule::new(cfg.clone()),
             bandwidth: BandwidthModule::new(cfg.clone()),
@@ -253,10 +258,15 @@ impl Node {
         // AME-35: a mutating request is answered only after its effect is on
         // disk. The fingerprint inside `flush` makes a no-op POST cheap, so
         // this stays correct even for read-only POSTs (proklesis, etc.).
-        if mutating && self.db.is_some() && (200..300).contains(&resp.status) {
+        // AME-XX: nonce consumption (factor-1 challenge) must also persist even
+        // when the triggering request is a GET (e.g. /resolve_hash).
+        let should_flush = mutating || self.nonce_consumed.load(Ordering::Relaxed);
+        if should_flush && self.db.is_some() && (200..300).contains(&resp.status) {
             if let Err(e) = self.persist() {
                 return Response::json(500, json_err(&format!("persist failed: {e}")));
             }
+            // Reset the flag so we don't flush unnecessarily on every request.
+            self.nonce_consumed.store(false, Ordering::Relaxed);
         }
         resp
     }
