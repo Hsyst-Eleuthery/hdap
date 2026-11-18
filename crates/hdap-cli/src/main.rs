@@ -13,7 +13,7 @@ use hdap_cli::{
     list_ktema, publish_alias, register, request_transfer, resolve, rotate_omphalos,
     transfer_inbox, transfer_owner, upload_with_band, HttpClient, Identity,
 };
-use hdap_core::{crypto::sha256_hex, RecoveryPhrase};
+use hdap_core::{crypto::sha256_hex, RecoveryPhrase, RECOVERY_VERSION};
 
 const KRYPTE: &str = "krypte.hdap";
 const PROSOPEION: &str = "prosopeion.hdap";
@@ -254,6 +254,7 @@ fn cmd_init(args: &CmdArgs, tail: &[String]) {
     println!();
     println!("  RECOVERY PHRASE (write this down, keep it offline):");
     println!("      {}", recovery.phrase());
+    println!("  Do not screenshot or store this phrase digitally. Write it on paper.");
     println!("  With this phrase and your passphrase you can run:");
     println!("      hdap-cli recover <PHRASE> <NICKNAME>");
     println!();
@@ -269,10 +270,15 @@ fn cmd_recover(args: &CmdArgs, tail: &[String]) {
     let phrase = tail.first().map(String::as_str).unwrap_or("");
     let nickname = tail.get(1).map(String::as_str).unwrap_or("user");
     if phrase.is_empty() {
-        eprintln!("hdap-cli: recover requires a recovery phrase (64 hex chars)");
+        eprintln!("hdap-cli: recover requires a recovery phrase (24 BIP-39 words)");
         std::process::exit(1);
     }
-    let recovery = match RecoveryPhrase::from_hex(phrase) {
+    // Strip the version prefix if present, then validate the 24 words.
+    let words_only = phrase
+        .strip_prefix(RECOVERY_VERSION)
+        .map(|s| s.trim())
+        .unwrap_or(phrase);
+    let recovery = match RecoveryPhrase::from_words(words_only) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("hdap-cli: invalid recovery phrase: {e:?}");
@@ -283,7 +289,7 @@ fn cmd_recover(args: &CmdArgs, tail: &[String]) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let seed = *recovery.entropy;
+    let seed = *recovery.seed;
     let identity = Identity::from_seed(nickname, now, &seed);
     let (k, p) = identity_paths(&args.home);
     // Ask for a passphrase to seal the recovered vault.

@@ -31,7 +31,7 @@ pub use crypto::{
 };
 pub use doc::{parse, Doc, DocType, ParseError, Signature, FORMAT_VERSION, MAGIC};
 pub use identity::{Identity, IDENTITY_USER_PREFIX};
-pub use mnemonic::{RecoveryError, RecoveryPhrase};
+pub use mnemonic::{RecoveryError, RecoveryPhrase, RECOVERY_VERSION};
 pub use pow::{solve_pow, verify_pow, PowProof};
 pub use protocol::{
     adeia_doc_with_diadosi, house_move_payload, sig_to_b64, transfer_payload, DiadosiDoc,

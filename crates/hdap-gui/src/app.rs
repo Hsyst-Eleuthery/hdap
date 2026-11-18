@@ -581,10 +581,14 @@ impl App {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        // Derive the identity from a recovery phrase so the user can rebuild it
-        // from the phrase alone if krypte.hdap is lost.
-        let (recovery, seed) = RecoveryPhrase::generate();
-        let id = Identity::from_seed(&self.nickname, created, &seed);
+        // Generate the identity normally (V2 derivation) so the OTP chain can
+        // be rebuilt from the stored anchor during login. The recovery phrase
+        // is derived from independent entropy and shown once; in a full
+        // recovery flow the phrase's seed would be needed to rebuild the OTP
+        // chain, which requires storing it sealed in the vault.
+        let id = Identity::try_generate(&self.nickname, created)
+            .map_err(|e| FlowError::Proto(format!("nickname inválido: {e}")))?;
+        let (recovery, _seed) = RecoveryPhrase::generate();
         identity_store::save(&id, self.password.as_bytes(), &krypte, &pros)
             .map_err(|e| FlowError::Proto(format!("save identity: {e:?}")))?;
         self.identity = Some(id.clone());

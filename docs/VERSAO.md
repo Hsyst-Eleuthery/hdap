@@ -37,7 +37,7 @@ Todo carimbo de tempo do protocolo é um `u64` com segundos desde `1970-01-01T00
 - `unix_secs_utc()` é a única fonte relógica do nó e do cliente.
 - `is_expired(now, exp)` trata `0` como "nunca expira" e considera inválido `now >= exp`.
 - **Autenticação**: o cliente deve devolver exatamente o `ts` emitido pelo servidor (`client_ts_matches`, igualdade exata). O relógio do cliente não recebe voto sobre a validade do desafio.
-- **Federação**: como ambos os lados geram seus próprios timestamps, `Config.time_tolerance_secs` (padrão `300`) permite `|ts_local − ts_recebido| ≤ tolerância`. A janela de anti-replay de nonces é separada, em `fed_window_secs` (padrão `30`).
+- **Federação**: como ambos os lados geram seus próprios timestamps, `Config.time_tolerance_secs` (padrão `300`) permite `|ts_local − ts_recebido| ≤ tolerância`. A janela de anti-replay de nonces é `fed_window_secs` (padrão `300`, igual à tolerância), de modo que um nonce nunca é esquecido antes de deixar de ser aceito pelo carimbo de tempo.
 - **Observabilidade**: `GET /health` publica `time_utc` e `date_utc`, e todas as respostas HTTP carregam `X-HDAP-Server-Time: <segundos UTC>`.
 
 Na prática, um cliente em qualquer fuso obtém o mesmo resultado para o mesmo `ts`: a formatação legível (`YYYY-MM-DD HH:MM:SS UTC`) é feita a partir do Unix UTC, nunca de `Local::now()`.

@@ -113,7 +113,7 @@ impl Default for Config {
             moira_bytes: 0,
             rate_limit_per_sec: 10,
             rate_limit_burst: 20,
-            fed_window_secs: 30,
+            fed_window_secs: 300,
             motd: String::new(),
             max_connections: 256,
             max_proklesis_per_user: 4,
