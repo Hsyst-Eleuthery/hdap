@@ -440,9 +440,9 @@ impl Identity {
         let sign_key_root = sha256ed(&self.sign_key);
         let anchor = &self.otp_anchor;
 
-        // Recovery-phrase accounts: try the vault root first, since it is the
+        // Recovery-phrase accounts: try the OTP root first, since it is the
         // derivation that produced the anchor. Factor 2 stays independent of
-        // factor 1 because the vault root comes from HKDF(seed, "hdap:recovery:vault").
+        // factor 1 because the OTP root comes from HKDF(seed, "hdap:recovery:otp").
         if let Some(root) = self.recovery_root {
             if crate::auth::make_otp_chain(&root, self.otp_k)
                 .0

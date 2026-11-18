@@ -114,6 +114,7 @@
 - **Token de sessão é determinístico** para `(K, server_id, exp)`: dois logins no mesmo segundo produzem o mesmo valor. A entropia vem do `K` derivado por X25519/HKDF, não de um nonce aleatório (AME-47).
 - **Formas legadas permanecem aceitas** para não abandonar quem já tem identidade: F3 `hdap:code:...` (AME-44), âncora OTP v1 de seed bruta (AME-45) e cofre v1 com Argon2 19 MiB (AME-11). A migração é progressiva: cofres v1 são regravados em v2 na próxima atualização, e sessões v1 são hashadas no load. Enquanto um cliente antigo usar as formas legadas, ele mantém as garantias antigas — mas não o vínculo ao desafio da v2.
 - **Cofre comprometido ainda é identidade comprometida**: os três fatores vivem no mesmo `krypte.hdap`; a rotação OMPHALOS exige a chave de identidade (AME-46), mas não recupera um cofre já copiado com senha conhecida.
+- **Separação de fatores no cofre protege contra falha de derivação, não contra roubo**: a raiz OTP é derivada com rótulo HKDF distinto da chave de assinatura, mas ambos vivem no mesmo `krypte.hdap` cifrado pela mesma senha. Se alguém obtém o cofre e a senha, tem todos os fatores. A defesa é senha forte + backup seguro (AME-11).
 
 ---
 

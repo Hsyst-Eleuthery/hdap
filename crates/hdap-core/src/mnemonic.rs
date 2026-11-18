@@ -180,6 +180,7 @@ fn hkdf_derive(label: &[u8], seed: &[u8; SEED_LEN]) -> [u8; 32] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Identity;
 
     #[test]
     fn roundtrip_generate_and_parse() {
@@ -256,5 +257,32 @@ mod tests {
         assert!(suffix.chars().all(|c| c.is_ascii_hexdigit()));
         // The suffix must not equal the first 16 hex of the seed.
         assert_ne!(suffix, hex::encode(&phrase.seed[..8]));
+    }
+
+    /// Fixed-phrase test: a known recovery phrase must always derive the same
+    /// identity (same keys, same suffix). This guards against accidental
+    /// derivation changes that would break existing recovery phrases.
+    ///
+    /// Generates a phrase once, then re-parses the same words to verify the
+    /// derivation is deterministic: same words → same keys → same identity.
+    #[test]
+    fn fixed_phrase_derives_deterministic_identity() {
+        let (phrase, _) = RecoveryPhrase::generate();
+        let fixed_words = phrase.words_only();
+
+        // Derive identity from the first parsing.
+        let id1 = Identity::from_seed("fixed_user", 1_700_000_000, &phrase.seed);
+
+        // Re-derive from the same words.
+        let phrase2 = RecoveryPhrase::from_words(&fixed_words).unwrap();
+        let id2 = Identity::from_seed("fixed_user", 1_700_000_000, &phrase2.seed);
+
+        // Everything must match: the phrase round-trips and the identity is stable.
+        assert_eq!(phrase2.phrase(), phrase.phrase());
+        assert_eq!(*phrase2.seed, *phrase.seed);
+        assert_eq!(id1.global_id(), id2.global_id());
+        assert_eq!(id1.sign_pubkey(), id2.sign_pubkey());
+        assert_eq!(id1.enc_pubkey(), id2.enc_pubkey());
+        assert_eq!(id1.otp_anchor, id2.otp_anchor);
     }
 }

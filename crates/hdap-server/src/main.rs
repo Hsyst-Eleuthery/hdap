@@ -316,18 +316,19 @@ fn main() -> ExitCode {
     hdap_server::log::init();
     let mut args = parse_args();
 
-    // Sanity-check federation timing: the replay-window memory must cover the
-    // full clock-skew tolerance, otherwise a timestamp accepted by skew could
-    // have its nonce already forgotten (replay between tolerance and window).
-    if args.cfg.fed_window_secs < args.cfg.time_tolerance_secs {
+    // Sanity-check federation timing: the replay-window memory must cover at
+    // least twice the clock-skew tolerance. A timestamp accepted by skew may
+    // arrive up to `time_tolerance_secs` early, and its nonce must still be
+    // remembered when the "real" arrival time comes.
+    if args.cfg.fed_window_secs < 2 * args.cfg.time_tolerance_secs {
         hdap_server::hlog!(
             error,
             "startup",
-            "fed_window_secs ({}) is smaller than time_tolerance_secs ({}); \
-             a timestamp accepted by skew could replay after its nonce is forgotten. \
-             Set --fed-window-secs >= --time-tolerance-secs.",
+            "fed_window_secs ({}) is smaller than 2 x time_tolerance_secs ({}); \
+             a skew-accepted timestamp could replay after its nonce is forgotten. \
+             Set --fed-window-secs >= 2 * --time-tolerance-secs.",
             args.cfg.fed_window_secs,
-            args.cfg.time_tolerance_secs
+            2 * args.cfg.time_tolerance_secs
         );
         return ExitCode::FAILURE;
     }

@@ -55,14 +55,18 @@ impl VaultSecrets {
         }
     }
 
-    /// Build secrets for a recovery-phrase identity. `recovery_root` is the
-    /// 32-byte root used to derive the OTP chain independently of the signing
-    /// key, so factor 2 stays independent of factor 1.
-    pub fn from_recovery(seed: &[u8; 32], recovery_root: &[u8; 32]) -> Self {
+    /// Build secrets for a recovery-phrase identity. All three key fields must
+    /// be provided; nothing is zeroed out, so the vault stays complete.
+    pub fn from_recovery(
+        seed: &[u8; 32],
+        sign_secret: &[u8; 32],
+        enc_secret: &[u8; 32],
+        recovery_root: &[u8; 32],
+    ) -> Self {
         VaultSecrets {
             seed: *seed,
-            sign_secret: [0u8; 32],
-            enc_secret: [0u8; 32],
+            sign_secret: *sign_secret,
+            enc_secret: *enc_secret,
             recovery_root: Some(*recovery_root),
         }
     }
@@ -105,47 +109,68 @@ fn bundle(secrets: &VaultSecrets) -> Vec<u8> {
 }
 
 fn unbundle(b: &[u8]) -> VaultResult<VaultSecrets> {
-    if b.is_empty() {
-        return Err(VaultError::Malformed);
-    }
-    let flag = b[0];
-    let mut offset = 1;
-    let seed: [u8; 32] = b
-        .get(offset..offset + 32)
-        .ok_or(VaultError::Malformed)?
-        .try_into()
-        .map_err(|_| VaultError::Malformed)?;
-    offset += 32;
-    let sign_secret: [u8; 32] = b
-        .get(offset..offset + 32)
-        .ok_or(VaultError::Malformed)?
-        .try_into()
-        .map_err(|_| VaultError::Malformed)?;
-    offset += 32;
-    let enc_secret: [u8; 32] = b
-        .get(offset..offset + 32)
-        .ok_or(VaultError::Malformed)?
-        .try_into()
-        .map_err(|_| VaultError::Malformed)?;
-    offset += 32;
-    let recovery_root = if flag == 1 {
-        Some(
-            b.get(offset..offset + 32)
+    // Differentiate by length so old vaults (exactly 96 bytes, no flag byte)
+    // keep opening after this change:
+    //   96 bytes  = legacy format: seed(32) + sign_secret(32) + enc_secret(32)
+    //   97 bytes  = new format without recovery_root: flag(0) + 96 bytes
+    //   129 bytes = new format with recovery_root: flag(1) + 128 bytes
+    match b.len() {
+        96 => {
+            let seed: [u8; 32] = b[0..32].try_into().map_err(|_| VaultError::Malformed)?;
+            let sign_secret: [u8; 32] = b[32..64].try_into().map_err(|_| VaultError::Malformed)?;
+            let enc_secret: [u8; 32] = b[64..96].try_into().map_err(|_| VaultError::Malformed)?;
+            Ok(VaultSecrets {
+                seed,
+                sign_secret,
+                enc_secret,
+                recovery_root: None,
+            })
+        }
+        97 | 129 => {
+            if b.is_empty() {
+                return Err(VaultError::Malformed);
+            }
+            let flag = b[0];
+            let mut offset = 1;
+            let seed: [u8; 32] = b
+                .get(offset..offset + 32)
                 .ok_or(VaultError::Malformed)?
                 .try_into()
-                .map_err(|_| VaultError::Malformed)?,
-        )
-    } else if flag == 0 {
-        None
-    } else {
-        return Err(VaultError::Malformed);
-    };
-    Ok(VaultSecrets {
-        seed,
-        sign_secret,
-        enc_secret,
-        recovery_root,
-    })
+                .map_err(|_| VaultError::Malformed)?;
+            offset += 32;
+            let sign_secret: [u8; 32] = b
+                .get(offset..offset + 32)
+                .ok_or(VaultError::Malformed)?
+                .try_into()
+                .map_err(|_| VaultError::Malformed)?;
+            offset += 32;
+            let enc_secret: [u8; 32] = b
+                .get(offset..offset + 32)
+                .ok_or(VaultError::Malformed)?
+                .try_into()
+                .map_err(|_| VaultError::Malformed)?;
+            offset += 32;
+            let recovery_root = if flag == 1 {
+                Some(
+                    b.get(offset..offset + 32)
+                        .ok_or(VaultError::Malformed)?
+                        .try_into()
+                        .map_err(|_| VaultError::Malformed)?,
+                )
+            } else if flag == 0 {
+                None
+            } else {
+                return Err(VaultError::Malformed);
+            };
+            Ok(VaultSecrets {
+                seed,
+                sign_secret,
+                enc_secret,
+                recovery_root,
+            })
+        }
+        _ => Err(VaultError::Malformed),
+    }
 }
 
 impl Vault {
@@ -320,5 +345,81 @@ mod tests {
         let parsed = Vault::from_bytes(&raw).unwrap();
         assert_eq!(parsed.params, ARGON2_PARAMS_V1);
         assert_eq!(parsed.open(b"pw").unwrap(), secrets);
+    }
+
+    /// Old vaults (pre-recovery-root) are exactly 96 bytes with no flag:
+    /// seed(32) + sign_secret(32) + enc_secret(32). They must keep opening.
+    #[test]
+    /// Old vaults (pre-recovery-root) are exactly 96 bytes with no flag:
+    /// seed(32) + sign_secret(32) + enc_secret(32). They must keep opening.
+    fn legacy_96_byte_vault_opens_without_flag() {
+        // Fixed bytes from an old vault's plaintext bundle (seed, sign_secret,
+        // enc_secret, no flag byte). Exactly 96 bytes.
+        let old_plaintext: [u8; 96] = [
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+            0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c,
+            0x1d, 0x1e, 0x1f, 0x20, // seed
+            0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e,
+            0x2f, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x3b, 0x3c,
+            0x3d, 0x3e, 0x3f, 0x40, // sign_secret
+            0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e,
+            0x4f, 0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5a, 0x5b, 0x5c,
+            0x5d, 0x5e, 0x5f, 0x60, // enc_secret
+        ];
+        let secrets = unbundle(&old_plaintext).unwrap();
+        assert_eq!(
+            secrets.seed,
+            [
+                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+                24, 25, 26, 27, 28, 29, 30, 31, 32
+            ]
+        );
+        assert_eq!(
+            secrets.sign_secret,
+            [
+                33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53,
+                54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64
+            ]
+        );
+        assert_eq!(
+            secrets.enc_secret,
+            [
+                65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85,
+                86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96
+            ]
+        );
+        assert!(secrets.recovery_root.is_none());
+    }
+
+    #[test]
+    fn new_97_byte_vault_without_root_opens() {
+        let mut plaintext = Vec::with_capacity(97);
+        plaintext.push(0); // flag = no recovery_root
+        plaintext.extend_from_slice(&[1u8; 32]); // seed
+        plaintext.extend_from_slice(&[2u8; 32]); // sign_secret
+        plaintext.extend_from_slice(&[3u8; 32]); // enc_secret
+        assert_eq!(plaintext.len(), 97);
+        let secrets = unbundle(&plaintext).unwrap();
+        assert_eq!(secrets.seed, [1u8; 32]);
+        assert_eq!(secrets.sign_secret, [2u8; 32]);
+        assert_eq!(secrets.enc_secret, [3u8; 32]);
+        assert!(secrets.recovery_root.is_none());
+    }
+
+    /// New vaults with recovery_root are 129 bytes (flag 1 + 128 bytes).
+    #[test]
+    fn new_129_byte_vault_with_root_opens() {
+        let mut plaintext = Vec::with_capacity(129);
+        plaintext.push(1); // flag = has recovery_root
+        plaintext.extend_from_slice(&[1u8; 32]); // seed
+        plaintext.extend_from_slice(&[2u8; 32]); // sign_secret
+        plaintext.extend_from_slice(&[3u8; 32]); // enc_secret
+        plaintext.extend_from_slice(&[4u8; 32]); // recovery_root
+        assert_eq!(plaintext.len(), 129);
+        let secrets = unbundle(&plaintext).unwrap();
+        assert_eq!(secrets.seed, [1u8; 32]);
+        assert_eq!(secrets.sign_secret, [2u8; 32]);
+        assert_eq!(secrets.enc_secret, [3u8; 32]);
+        assert_eq!(secrets.recovery_root, Some([4u8; 32]));
     }
 }
