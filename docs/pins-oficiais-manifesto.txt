@@ -27,4 +27,5 @@ As chaves públicas anunciadas por cada nó:
 | pyle3.hdap.hsyst.org:8445 | 652623de5c1087a45a18f0ddc2ebc2c5ca48e6bda9ac15c86fc43c1f54e92e02 | 1cacc66936d7cbfc882f847eb231ed149cd5f64083e9f991c392f2dda3212c62 |
 | pyle.thais.fyi:8443 | 7113350e536c39488b4712ca29d704b2974acae0e65dded37cefab01524aeb5d | 306b3cae6b440c24ce00336e4c0d35cf4331a6cf37a0b9f973fd29e68bcad46c |
 
----fim---
+
+Assinado com a chave <thais@github> verificável em thais.fyi/#verificar
