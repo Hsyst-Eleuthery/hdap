@@ -94,6 +94,32 @@ pub fn take_tofu_dirty() -> bool {
     TOFU_DIRTY.swap(false, std::sync::atomic::Ordering::AcqRel)
 }
 
+/// Reconcile the certificate accepted by a just-finished handshake with the
+/// pin currently stored for the endpoint.
+///
+/// Two first-contact handshakes can start concurrently with no pin configured,
+/// and each verifier accepts the certificate it sees. Whoever locks the handle
+/// first records its pin; the other must compare its own observed pin with the
+/// now-stored one and refuse to talk if they differ. Without this check the
+/// second client would send its HTTP request over a connection authenticated
+/// by a different certificate than the one just pinned (AME-09).
+fn reconcile_tofu_pin(handle: &PinHandle, observed: &str) -> io::Result<()> {
+    let mut guard = handle.lock().unwrap_or_else(|p| p.into_inner());
+    match guard.clone() {
+        None => {
+            *guard = Some(observed.to_string());
+            drop(guard);
+            TOFU_DIRTY.store(true, std::sync::atomic::Ordering::Release);
+            Ok(())
+        }
+        Some(stored) if stored != observed => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "HDAP TOFU: peer certificate changed during first contact",
+        )),
+        Some(_) => Ok(()),
+    }
+}
+
 /// A plain HTTP/1.1 client targeting a single host:port.
 /// Used by the server to dial peers for blob replication.
 #[derive(Debug, Clone)]
@@ -269,23 +295,17 @@ impl FedHttpClient {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .clone();
-        let verifier = hdap_tls::PinVerifier::new(pin.clone());
+        let verifier = hdap_tls::PinVerifier::new(pin);
         let verifier_clone = verifier.clone();
         let mut stream = hdap_tls::connect(tcp, &self.host, verifier)?;
+        // Reconcile BEFORE writing the request: a concurrent first contact
+        // may have pinned a different certificate while our handshake was in
+        // flight. In that case the connection must be dropped untrusted.
+        if let Some(observed) = verifier_clone.observed() {
+            reconcile_tofu_pin(&self.tls_pin, &observed)?;
+        }
         stream.write_all(request)?;
         stream.flush()?;
-        // Record the pin accepted by the verifier in the shared handle so every
-        // later client for this endpoint enforces it. Write only while the
-        // handle is still empty, so two concurrent first connections cannot
-        // overwrite each other's learned pin.
-        if let Some(observed) = verifier_clone.observed() {
-            let mut guard = self.tls_pin.lock().unwrap_or_else(|p| p.into_inner());
-            if guard.is_none() {
-                *guard = Some(observed);
-                drop(guard);
-                TOFU_DIRTY.store(true, std::sync::atomic::Ordering::Release);
-            }
-        }
         self.read_response(&mut stream)
     }
 
@@ -631,5 +651,57 @@ mod tests {
             client3.tls_pin.lock().unwrap().as_deref(),
             Some("sha256:operator")
         );
+    }
+
+    /// Two connections that both start a first-contact handshake with no pin
+    /// must not both be accepted when they saw different certificates: the
+    /// second one has to be rejected before its HTTP request is sent.
+    #[test]
+    fn concurrent_first_contact_rejects_a_divergent_certificate() {
+        // Deterministic form: the pin is already recorded when the second
+        // handshake finishes reconciling.
+        let handle: PinHandle = std::sync::Arc::new(std::sync::Mutex::new(None));
+        reconcile_tofu_pin(&handle, "sha256:cert-a").unwrap();
+        assert_eq!(
+            reconcile_tofu_pin(&handle, "sha256:cert-b")
+                .err()
+                .map(|e| e.kind()),
+            Some(io::ErrorKind::InvalidData),
+            "a divergent second certificate must be rejected"
+        );
+        assert_eq!(
+            handle.lock().unwrap().as_deref(),
+            Some("sha256:cert-a"),
+            "the first pin must not be overwritten"
+        );
+        reconcile_tofu_pin(&handle, "sha256:cert-a").unwrap();
+
+        // Actual concurrency: both handshakes start before either records a
+        // pin. Exactly one may succeed; the other sees the winner's pin.
+        let handle: PinHandle = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let results = std::thread::scope(|s| {
+            let a = s.spawn(|| {
+                barrier.wait();
+                reconcile_tofu_pin(&handle, "sha256:cert-a")
+            });
+            let b = s.spawn(|| {
+                barrier.wait();
+                reconcile_tofu_pin(&handle, "sha256:cert-b")
+            });
+            (a.join().unwrap(), b.join().unwrap())
+        });
+        assert_eq!(
+            results.0.is_ok() as usize + results.1.is_ok() as usize,
+            1,
+            "exactly one concurrent first contact may win"
+        );
+        assert_eq!(
+            results.0.is_err() as usize + results.1.is_err() as usize,
+            1,
+            "the divergent concurrent handshake must be rejected"
+        );
+        let stored = handle.lock().unwrap().clone().unwrap();
+        reconcile_tofu_pin(&handle, &stored).unwrap();
     }
 }

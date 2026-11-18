@@ -44,7 +44,7 @@ Geração **Téleia vási**. Codinome de protocolo: **Teleios**. Codinome de lan
 ### Compatibilidade e qualidade
 
 - Cofre local versionado: cabeçalho `HDAPVAULT\0\x02` com parâmetros Argon2 no cabeçalho (padrão 64 MiB/t=2/p=1); cofres v1 (19 MiB/t=2/p=1) continuam legíveis. Limites de sanidade impedem parâmetros absurdos em cofres v2.
-- 269 testes automatizados; novos testes cobrem rotação assinada na CLI e na GUI, F3 vinculado, cofre v1/v2, chave externa, sessões hashadas e exibição da Ángelma.
+- 270 testes automatizados; novos testes cobrem rotação assinada na CLI e na GUI, F3 vinculado, cofre v1/v2, chave externa, sessões hashadas e exibição da Ángelma.
 
 ### Documentação
 
@@ -68,7 +68,7 @@ Geração **Téleia vási**. Codinome de protocolo: **Teleios**. Codinome de lan
 - **Frase de recuperação vinculada à conta:** a frase BIP-39 (24 palavras com checksum) gera a identidade completa via HKDF-SHA512 com rótulos independentes (`hdap:recovery:sign/enc/otp`). A raiz OTP é gravada no cofre cifrado (`recovery_root`), de modo que perder o `krypte.hdap` não significa perder a conta: `hdap-cli recover <FRASE> <NICK>` reconstrói a identidade. A GUI exibe a frase na criação da identidade e a frase é vinculada à conta (não é sorteada à parte).
 - **Derivação independente por função:** `Identity` ganha o enum `OtpDerivation` (V1/V2/Recovery); `otp_chain_for()` tenta cada derivação e usa a que reproduz o `otp_anchor` armazenado. A raiz do cofre e a raiz OTP são derivadas com rótulos HKDF distintos, preservando a separação entre fator 1 (assinatura) e fator 2 (OTP).
 - **Cofre com raiz de recuperação:** `VaultSecrets` ganha o campo opcional `recovery_root` (zeroizado); o formato de gravação do cofre inclui um byte de flag + 32 bytes opcionais. Cofres antigos (sem a flag) continuam legíveis.
-- **Documentação:** comentário de `mnemonic.rs` corrigido (HKDF-SHA512, não SHA-256); `bip39` movido para as dependências de workspace; contagem de testes atualizada para **269** em todos os documentos.
+- **Documentação:** comentário de `mnemonic.rs` corrigido (HKDF-SHA512, não SHA-256); `bip39` movido para as dependências de workspace; contagem de testes atualizada para **270** em todos os documentos.
 
 ### Segunda rodada de auditoria (2026-11-18)
 
@@ -76,7 +76,13 @@ Geração **Téleia vási**. Codinome de protocolo: **Teleios**. Codinome de lan
 - **Concorrência na persistência:** o `AtomicBool` `nonce_consumed` foi substituído por `PersistSignal`, um par de contadores de geração. O consumo de nonce (inclusive em requisições que terminam em 401/403) marca a geração *depois* de aplicar a mutação; um flush captura a geração antes de tirar o snapshot e só avança o contador persistido até esse valor. Assim, uma requisição concorrente que marca o estado como sujo durante um flush não tem seu sinal apagado.
 - **Integridade dos sidecars de blob:** cada gravação usa arquivo temporário + `fsync` + rename atômico, e a leitura valida tamanho e SHA-256 contra a linha do SQLite antes de preferir o arquivo externo; se o sidecar estiver ausente ou corrompido, o BLOB do SQLite é usado e a cópia externa é reparada no próximo flush.
 - **Duplicação de `security.txt` removida:** resta apenas `.well-known/security.txt`, a localização canônica da RFC 9116.
-- **Testes:** a suíte passou a **269 testes**, com cobertura para reuso do pin TOFU entre instâncias, persistência do pin no registro do peer e concorrência do sinal de persistência. Validação: `cargo fmt --check`, `cargo clippy -D warnings` e `cargo test --workspace`, todos verdes.
+- **Testes:** a suíte passou a **270 testes**, com cobertura para reuso do pin TOFU entre instâncias, persistência do pin no registro do peer e concorrência do sinal de persistência. Validação: `cargo fmt --check`, `cargo clippy -D warnings` e `cargo test --workspace`, todos verdes.
+
+### Fechamento da corrida de primeiro contato TOFU (2026-11-18)
+
+- **Ressalva final da auditoria fechada:** duas conexões que iniciam o handshake TLS antes de existir pin podiam aceitar certificados diferentes. O código já evitava sobrescrever o primeiro pin, mas ainda enviava a requisição HTTP pela conexão divergente. A reconciliação foi extraída para `reconcile_tofu_pin()`: após o handshake e **antes** de `stream.write_all(request)`, o fingerprint observado é comparado com o pin armazenado sob o mutex. Se divergirem, a conexão é rejeitada com `InvalidData` (`HDAP TOFU: peer certificate changed during first contact`) e nenhum byte da requisição é enviado.
+- **Teste dedicado:** `concurrent_first_contact_rejects_a_divergent_certificate` cobre o caso determinístico (pin já registrado) e a concorrência real com `Barrier`, garantindo que exatamente um dos dois primeiros contatos vence e que o pin do primeiro nunca é sobrescrito.
+- **Consolidação encerrada:** suíte completa novamente verde com **270 testes aprovados**, nenhuma falha.
 
 ## v1.001 — 2026-10-29
 
