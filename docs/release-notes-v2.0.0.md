@@ -76,13 +76,17 @@ Não há migrador de documentos: o formato permanece o mesmo.
 
 ## Downloads
 
-| Pacote | Plataforma |
-|---|---|
-| `hdap-2.0.0-x86_64-unknown-linux-gnu.tar.gz` | Linux x86_64 com glibc (Debian, Ubuntu, Fedora…) |
-| `hdap-2.0.0-x86_64-unknown-linux-musl.tar.gz` | Linux x86_64 estático (Alpine, containers, sem glibc) |
-| `hdap-2.0.0-x86_64-pc-windows-gnu.zip` | Windows x86_64 |
+| Pacote | Plataforma | Conteúdo |
+|---|---|---|
+| `hdap-2.0.0-x86_64-unknown-linux-gnu.tar.gz` | Linux x86_64 com glibc (Debian, Ubuntu, Fedora…) — **use este para a GUI** | `hdap-server`, `hdap-gui`, `hdap-cli` |
+| `hdap-2.0.0-x86_64-unknown-linux-musl.tar.gz` | Linux x86_64 estático (Alpine, containers, servidores sem display) | `hdap-server`, `hdap-cli` |
+| `hdap-2.0.0-x86_64-pc-windows-gnu.zip` | Windows x86_64 | `hdap-server.exe`, `hdap-gui.exe`, `hdap-cli.exe` |
 
-Cada pacote traz `hdap-server`, `hdap-gui` e `hdap-cli` (com `.exe` no Windows), além de `README.md`, `LICENSE` e `SHA256SUMS`.
+Cada pacote traz `README.md`, `LICENSE` e `SHA256SUMS` (o pacote musl também inclui `AVISO-GUI.txt`).
+
+**Sobre a GUI no Linux.** O pacote GNU é linkado com glibc **2.28** como baseline, então roda em Ubuntu 24.04 (glibc 2.39), Debian 12 e outras distribuições recentes. Ele precisa das bibliotecas de sistema `libwayland-client.so.0` ou `libX11.so.6` — já presentes em qualquer desktop Wayland/X11.
+
+O pacote musl é estático e **não inclui `hdap-gui`**: um binário estático não consegue carregar as bibliotecas Wayland/X11 do sistema (o `winit` usa `dlopen`), e a interface falharia com `NoWaylandLib` ou `Dynamic loading not supported`. Para rodar a interface gráfica, baixe o pacote GNU. O pacote musl continua sendo a opção para servidores e CLI em ambientes sem display.
 
 ---
 

@@ -113,7 +113,15 @@ A confiança não é uma promessa: é uma sequência de provas que qualquer clie
 
 ### Baixar uma versão pronta
 
-Os pacotes de cada sistema ficam em **[Releases](https://github.com/Hsyst-Eleuthery/hdap/releases)**. A release **v2.0 (Teleios)** é empacotada como `2.0.0`. Para Linux x86_64 com biblioteca estática, baixe `hdap-2.0.0-x86_64-unknown-linux-musl.tar.gz`, que é a opção mais portátil e não depende da glibc do sistema. Para Linux x86_64 com glibc, baixe `hdap-2.0.0-x86_64-unknown-linux-gnu.tar.gz`. Para Windows x86_64, baixe `hdap-2.0.0-x86_64-pc-windows-gnu.zip`. Cada pacote inclui `hdap-server`, `hdap-gui` e `hdap-cli` — com a extensão `.exe` no Windows — e um checksum SHA-256. Confira o checksum antes de executar qualquer binário. As [notas da release v2.0.0](docs/release-notes-v2.0.0.md) trazem mudanças, compatibilidade e instruções de verificação.
+Os pacotes de cada sistema ficam em **[Releases](https://github.com/Hsyst-Eleuthery/hdap/releases)**. A release **v2.0 (Teleios)** é empacotada como `2.0.0`.
+
+| Pacote | Conteúdo |
+|---|---|
+| `hdap-2.0.0-x86_64-unknown-linux-gnu.tar.gz` | `hdap-server`, `hdap-gui`, `hdap-cli` — **use este na área de trabalho Linux** |
+| `hdap-2.0.0-x86_64-unknown-linux-musl.tar.gz` | `hdap-server` e `hdap-cli` — estático, para servidores sem display |
+| `hdap-2.0.0-x86_64-pc-windows-gnu.zip` | `hdap-server.exe`, `hdap-gui.exe`, `hdap-cli.exe` |
+
+O pacote GNU é linkado com baseline glibc **2.28**, portanto roda em Ubuntu 24.04, Debian 12 e distribuições semelhantes. O pacote musl é estático e **não contém a GUI**: um binário estático não consegue carregar as bibliotecas Wayland/X11 que a interface precisa. Cada pacote inclui um checksum SHA-256; confira-o antes de executar qualquer binário. As [notas da release v2.0.0](docs/release-notes-v2.0.0.md) trazem mudanças, compatibilidade e instruções de verificação.
 
 ### Compilar do código
 
