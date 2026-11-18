@@ -335,17 +335,19 @@ dependencies = [
 
 [[package]]
 name = "hdap-core"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "argon2",
  "base64",
  "chacha20poly1305",
  "ed25519-dalek",
  "hex",
+ "hkdf",
  "hmac",
  "rand_core",
  "sha2",
  "x25519-dalek",
+ "zeroize",
 ]
 
 [[package]]
@@ -362,7 +364,7 @@ dependencies = [
 
 [[package]]
 name = "hdap-server"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -379,7 +381,7 @@ dependencies = [
 
 [[package]]
 name = "hdap-tls"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "hex",
  "rcgen",
@@ -392,6 +394,15 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
+name = "hkdf"
+version = "0.12.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b5f8eb2ad728638ea2c7d47a21db23b7b58a72ed6a38256b8a1849f15fbbdf7"
+dependencies = [
+ "hmac",
+]
 
 [[package]]
 name = "hmac"

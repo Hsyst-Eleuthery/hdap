@@ -58,12 +58,13 @@ impl StorageModule {
         if sphragis_bytes.len() != 64 {
             return Response::json(400, json_err("invalid sphragis signature length"));
         }
-        let sphragis: [u8; 64] = sphragis_bytes.as_slice().try_into().unwrap();
+        let sphragis: [u8; 64] = match sphragis_bytes.as_slice().try_into() {
+            Ok(sig) => sig,
+            Err(_) => return Response::json(400, json_err("invalid sphragis signature length")),
+        };
         let sphragis = Ed25519Signature::from_bytes(&sphragis);
         let Some(owner_pub) = node
-            .state
-            .lock()
-            .unwrap()
+            .lock_state()
             .users
             .get(&user_id)
             .and_then(|u| u.sign_pub_bytes())
@@ -82,37 +83,49 @@ impl StorageModule {
         }
         let key = State::key(&owner, &path);
         let hash = content_hash(&req.body);
-        let master_key = node.state.lock().unwrap().master_key;
+        let master_key = node.lock_state().master_key;
         let sealed = aead_seal(&master_key, &req.body);
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
+
+        // A re-upload of the exact same content changes nothing on disk. Do
+        // not burn a syngraphe or band credit for a zero-delta operation.
+        let previous = st.objects.get(&key).cloned();
+        let new_len = req.body.len() as u64;
+        let old_len = previous
+            .as_ref()
+            .map(|b| b.bytes.len().saturating_sub(SEAL_OVERHEAD) as u64)
+            .unwrap_or(0);
+        let unchanged = previous.as_ref().is_some_and(|b| b.hash == hash);
 
         // Per-user storage quota (`moira`, §16.4); 0 = unlimited. Checked
         // *before* payment so a refused upload never burns band credit or a
         // syngraphe/pow proof (charging for a rejected request is a bug).
+        // Overwrites only consume the *delta*, not the whole file again.
         let used = st.stored.get(&owner).copied().unwrap_or(0);
-        if self.cfg.moira_bytes > 0 && used + req.body.len() as u64 > self.cfg.moira_bytes {
+        let projected = used.saturating_sub(old_len).saturating_add(new_len);
+        if self.cfg.moira_bytes > 0 && projected > self.cfg.moira_bytes {
             return Response::json(413, json_err("moira quota exceeded"));
         }
 
         // Payment (§9.4). A countersigned `.hdap.pow` is consumed by an
         // owner-signed `syngraphe`; the proof object is replaced by the
         // syngraphe in the same directory. Legacy/small uploads fall back to
-        // the raw `choregia` integer.
-        let mut paid_by_band = false;
-        if let Some(header) = req.headers.get("x-hdap-syngraphe") {
-            match self.consume_syngraphe(&mut st, &owner, &path, header, req.body.len() as u64, now)
-            {
-                Ok(()) => paid_by_band = true,
-                Err(resp) => return resp,
+        // the raw `choregia` integer. Skipped entirely for a no-op upload.
+        if !unchanged {
+            let mut paid_by_band = false;
+            if let Some(header) = req.headers.get("x-hdap-syngraphe") {
+                match self.consume_syngraphe(&mut st, &owner, &path, header, new_len, now) {
+                    Ok(()) => paid_by_band = true,
+                    Err(resp) => return resp,
+                }
             }
-        }
-        if !paid_by_band {
-            let credit = st.choregia.get(&owner).copied().unwrap_or(0);
-            if credit < req.body.len() as u64 {
-                return Response::json(403, json_err("insufficient band credit"));
+            if !paid_by_band {
+                let credit = st.choregia.get(&owner).copied().unwrap_or(0);
+                if credit < new_len {
+                    return Response::json(403, json_err("insufficient band credit"));
+                }
+                st.choregia.insert(owner.clone(), credit - new_len);
             }
-            st.choregia
-                .insert(owner.clone(), credit - req.body.len() as u64);
         }
 
         // Encrypt at rest; never store plaintext.
@@ -125,7 +138,12 @@ impl StorageModule {
                 bytes: sealed,
             },
         );
-        *st.stored.entry(owner.clone()).or_insert(0) += req.body.len() as u64;
+        // Track the real occupancy: an overwrite replaces the old bytes.
+        let used = st.stored.get(&owner).copied().unwrap_or(0);
+        st.stored.insert(
+            owner.clone(),
+            used.saturating_sub(old_len).saturating_add(new_len),
+        );
 
         // Config documents written by their owner drive the *structured* maps
         // too (§16): saving `adeia.hdap` in the GUI would otherwise update a
@@ -150,10 +168,14 @@ impl StorageModule {
                 .or_insert_with(|| crate::store::PrytaneionEntry {
                     content_hash: hash.clone(),
                     origin_server: self.cfg.server_id.clone(),
-                    origin_user: owner.clone(),
+                    // The author is the authenticated session user, not the
+                    // namespace owner: a delegate may write into somebody
+                    // else's space, but the sphragis is *their* signature.
+                    origin_user: user_id.clone(),
                     origin_user_pubkey: pubkey_hex.clone(),
                     origin_path: path.clone(),
                     sphragis: sphragis_b64.clone(),
+                    namespace_owner: owner.clone(),
                     replicas: vec![replica.clone()],
                     deletions: vec![],
                     created_at,
@@ -169,6 +191,9 @@ impl StorageModule {
         }
         if entry.sphragis.is_empty() {
             entry.sphragis = sphragis_b64.clone();
+        }
+        if entry.namespace_owner.is_empty() {
+            entry.namespace_owner = owner.clone();
         }
         if !entry.replicas.contains(&replica) {
             entry.replicas.push(replica.clone());
@@ -324,7 +349,7 @@ impl StorageModule {
             return Response::json(403, json_err("forbidden: insufficient permission"));
         }
         let key = State::key(&owner, &path);
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         let Some(blob) = st.objects.get(&key).cloned() else {
             return Response::json(404, json_err("file not found"));
         };
@@ -363,7 +388,7 @@ impl StorageModule {
         {
             return Response::json(403, json_err("forbidden: insufficient permission"));
         }
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         // Aggregate under each first segment: a subdirectory (more `/`
         // segments follow) or a direct file (the whole remainder is the name).
         let mut dirs: std::collections::BTreeSet<String> = Default::default();
@@ -435,7 +460,7 @@ impl StorageModule {
         }
         let key = State::key(&owner, &path);
         let (hash, deletion, operation_id) = {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             // Capture the hash and plaintext before the blob is gone: the hash
             // identifies the replicas to retract, and config-doc deletions must
             // retract their structured side effects (permissions/aliases).
@@ -602,7 +627,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn signed_upload_req(node: &Node, owner: &str, path: &str, size: usize) -> Request {
-        let seed = node.state.lock().unwrap().node_sign_seed;
+        let seed = node.lock_state().node_sign_seed;
         let sign_key = ed25519_dalek::SigningKey::from_bytes(&seed);
         let data = vec![0u8; size];
         let sphragis = base64::engine::general_purpose::STANDARD
@@ -619,7 +644,154 @@ mod tests {
             query,
             headers,
             body: data,
+            peer: None,
         }
+    }
+
+    fn upload_req(owner: &str, path: &str, body: Vec<u8>, author_seed: [u8; 32]) -> Request {
+        let sign_key = ed25519_dalek::SigningKey::from_bytes(&author_seed);
+        let sphragis = base64::engine::general_purpose::STANDARD
+            .encode(ed25519_dalek::Signer::sign(&sign_key, &body).to_bytes());
+        let mut query = BTreeMap::new();
+        query.insert("owner".to_string(), owner.to_string());
+        query.insert("path".to_string(), path.to_string());
+        let mut headers = BTreeMap::new();
+        headers.insert("authorization".to_string(), "Bearer tok".to_string());
+        headers.insert("x-hdap-sphragis".to_string(), sphragis);
+        Request {
+            method: "POST".to_string(),
+            path: "ktema".to_string(),
+            query,
+            headers,
+            body,
+            peer: None,
+        }
+    }
+
+    fn add_user(st: &mut State, user_id: &str, seed: [u8; 32]) {
+        let pubkey = ed25519_dalek::SigningKey::from_bytes(&seed)
+            .verifying_key()
+            .to_bytes();
+        st.users.insert(
+            user_id.to_string(),
+            crate::store::UserRecord {
+                user_id: user_id.to_string(),
+                nickname: user_id.split('_').next().unwrap_or("user").to_string(),
+                suffix_hex: "0123456789abcdef".to_string(),
+                sign_pub_hex: hex::encode(pubkey),
+                enc_pub_hex: "bb".repeat(32),
+                otp_anchor_hex: "cc".repeat(32),
+                otp_k: 1024,
+                created_at: 1_700_000_000,
+                v2_f3: true,
+                home_pyle: "pyle-p".into(),
+            },
+        );
+    }
+
+    /// A delegate writing into another user's namespace must be recorded as
+    /// the *author* (`origin_user`), while the ledger keeps the namespace
+    /// separately. v1 conflated the two and mis-attributed delegated writes.
+    #[test]
+    fn a_delegated_upload_records_author_and_namespace_separately() {
+        let alice = "alice_0123456789abcdef";
+        let bob = "bob_0123456789abcdef";
+        let alice_seed = [1u8; 32];
+        let bob_seed = [2u8; 32];
+        let node = Node::new(Config::default());
+        {
+            let mut st = node.lock_state();
+            add_user(&mut st, alice, alice_seed);
+            add_user(&mut st, bob, bob_seed);
+            st.sessions.insert(
+                hdap_core::session_storage_key("tok"),
+                Session {
+                    user_id: bob.to_string(),
+                    exp: u64::MAX,
+                },
+            );
+            let mut acl =
+                hdap_core::doc::Doc::new(hdap_core::doc::DocType::Adeia, 1, None, 1_700_000_000);
+            acl.body.insert(
+                "RULE1".into(),
+                format!("PERM {alice} user:{bob} notes.txt write"),
+            );
+            st.permissions.insert(alice.to_string(), acl.render());
+            st.choregia.insert(alice.to_string(), 10_000);
+        }
+        let req = upload_req(alice, "notes.txt", vec![7u8; 10], bob_seed);
+        let resp = node.storage.handle_ktema_upload(&node, &req);
+        assert_eq!(resp.status, 201, "{}", String::from_utf8_lossy(&resp.body));
+
+        let st = node.lock_state();
+        let hash = st.objects[&State::key(alice, "notes.txt")].hash.clone();
+        let entry = &st.prytaneion[&hash];
+        assert_eq!(entry.origin_user, bob, "the signer is the author");
+        assert_eq!(entry.namespace_owner, alice, "the namespace is separate");
+        assert_eq!(
+            entry.origin_user_pubkey,
+            hex::encode(
+                ed25519_dalek::SigningKey::from_bytes(&bob_seed)
+                    .verifying_key()
+                    .to_bytes()
+            )
+        );
+    }
+
+    /// Overwrites replace bytes instead of stacking them: the quota counts the
+    /// real occupancy, and re-uploading identical bytes costs no band at all.
+    #[test]
+    fn overwrites_count_only_real_storage_and_skip_no_op_uploads() {
+        let alice = "alice_0123456789abcdef";
+        let seed = [3u8; 32];
+        let cfg = Config {
+            moira_bytes: 100,
+            ..Config::default()
+        };
+        let node = Node::new(cfg);
+        {
+            let mut st = node.lock_state();
+            add_user(&mut st, alice, seed);
+            st.sessions.insert(
+                hdap_core::session_storage_key("tok"),
+                Session {
+                    user_id: alice.to_string(),
+                    exp: u64::MAX,
+                },
+            );
+            st.choregia.insert(alice.to_string(), 10_000);
+        }
+        let resp = node
+            .storage
+            .handle_ktema_upload(&node, &upload_req(alice, "f", vec![1u8; 60], seed));
+        assert_eq!(resp.status, 201, "{}", String::from_utf8_lossy(&resp.body));
+        let credit_after_first = node.lock_state().choregia[alice];
+        assert_eq!(credit_after_first, 10_000 - 60);
+
+        // Identical bytes: no second charge, occupancy unchanged.
+        let resp = node
+            .storage
+            .handle_ktema_upload(&node, &upload_req(alice, "f", vec![1u8; 60], seed));
+        assert_eq!(resp.status, 201, "{}", String::from_utf8_lossy(&resp.body));
+        {
+            let st = node.lock_state();
+            assert_eq!(st.stored[alice], 60);
+            assert_eq!(st.choregia[alice], credit_after_first);
+        }
+
+        // A larger overwrite fits exactly; stored bytes reflect the delta.
+        let resp = node
+            .storage
+            .handle_ktema_upload(&node, &upload_req(alice, "f", vec![2u8; 100], seed));
+        assert_eq!(resp.status, 201, "{}", String::from_utf8_lossy(&resp.body));
+        assert_eq!(node.lock_state().stored[alice], 100);
+
+        // One byte past the quota is refused and changes nothing.
+        let resp = node
+            .storage
+            .handle_ktema_upload(&node, &upload_req(alice, "f", vec![3u8; 101], seed));
+        assert_eq!(resp.status, 413, "{}", String::from_utf8_lossy(&resp.body));
+        assert_eq!(node.lock_state().stored[alice], 100);
     }
 
     /// A refused upload must not charge the user: the moira quota is checked
@@ -633,7 +805,7 @@ mod tests {
         };
         let node = Node::new(cfg);
         {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             // Extract node_sign_seed before mutable borrow
             let seed = st.node_sign_seed;
             // Create user with signing key
@@ -652,11 +824,12 @@ mod tests {
                     otp_anchor_hex: "cc".repeat(32),
                     otp_k: 1024,
                     created_at: 1_700_000_000,
+                    v2_f3: true,
                     home_pyle: "pyle-p".into(),
                 },
             );
             st.sessions.insert(
-                "tok".to_string(),
+                hdap_core::session_storage_key("tok"),
                 Session {
                     user_id: owner.to_string(),
                     exp: u64::MAX,
@@ -670,7 +843,7 @@ mod tests {
             .handle_ktema_upload(&node, &signed_upload_req(&node, owner, "big.bin", 200));
         assert_eq!(resp.status, 413, "{}", String::from_utf8_lossy(&resp.body));
         {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             assert_eq!(
                 st.choregia.get(owner).copied(),
                 Some(10_000),
@@ -684,7 +857,7 @@ mod tests {
             .storage
             .handle_ktema_upload(&node, &signed_upload_req(&node, owner, "small.bin", 50));
         assert_eq!(resp.status, 201, "{}", String::from_utf8_lossy(&resp.body));
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         assert_eq!(st.choregia.get(owner).copied(), Some(9_950));
         assert!(st.objects.contains_key(&State::key(owner, "small.bin")));
     }

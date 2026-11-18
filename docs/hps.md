@@ -1,6 +1,8 @@
 # HPS — o projeto predecessor
 
-**HDAP v1.001 — Themelio · Epoptia**
+*Revisão de 2026-11-17.*
+
+**HDAP v2.0 — Téleia vási · Teleios**
 
 **Escrito por Thaís (op3n/op3ny)**
 
@@ -65,4 +67,4 @@ Quem quer navegar, minerar e participar de uma economia de vouchers encontra iss
 
 ---
 
-**Leia também:** [userguide.md](userguide.md) · [tecnico.md](tecnico.md) · [filosofia-economica.md](filosofia-economica.md)
+**Leia também:** [guia-1-introducao.md](guia-1-introducao.md) · [tecnico.md](tecnico.md) · [filosofia-economica.md](filosofia-economica.md)

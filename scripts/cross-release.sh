@@ -23,6 +23,11 @@ ASSETS="$ROOT/target/release-assets"
 STAGE="$ASSETS/$TARGET"
 
 find_zig() {
+    # setup-zig (CI) and most local installs put zig on PATH; check it first.
+    if command -v zig >/dev/null 2>&1; then
+        command -v zig
+        return 0
+    fi
     for p in "$HOME/.local/zig"/*/zig "$HOME/.local/zig/bin/zig" /usr/local/bin/zig /usr/bin/zig; do
         if [[ -x "$p" ]]; then echo "$p"; return 0; fi
     done

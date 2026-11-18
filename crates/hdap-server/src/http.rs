@@ -6,7 +6,8 @@
 
 use std::collections::BTreeMap;
 use std::io::{self, BufWriter, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::sync::{Arc, Mutex};
 
 /// Reason phrases for the statuses the protocol emits.
 pub fn reason(status: u16) -> &'static str {
@@ -23,6 +24,7 @@ pub fn reason(status: u16) -> &'static str {
         413 => "Payload Too Large",
         429 => "Too Many Requests",
         500 => "Internal Server Error",
+        503 => "Service Unavailable",
         _ => "Unknown",
     }
 }
@@ -38,6 +40,10 @@ pub struct Request {
     /// Lower-cased header names to values (first wins).
     pub headers: BTreeMap<String, String>,
     pub body: Vec<u8>,
+    /// Real network peer, recorded by the kernel. Never taken from a header:
+    /// it is the key used for rate limiting (AME-21). `None` for synthetic
+    /// requests built in tests.
+    pub peer: Option<SocketAddr>,
 }
 
 /// A response to serialize back to the socket.
@@ -258,6 +264,7 @@ pub fn parse_request(bytes: &[u8], max_body: usize) -> io::Result<Request> {
         query,
         headers,
         body,
+        peer: None,
     })
 }
 
@@ -341,11 +348,61 @@ pub fn write_response<S: Write>(stream: &mut S, resp: &Response) -> io::Result<(
     for (k, v) in &resp.headers {
         head.push_str(&format!("{k}: {v}\r\n"));
     }
+    // Give every client an authoritative UTC Unix timestamp. Clients use this
+    // to align their clocks instead of converting local timezones (v2/Teleios).
+    head.push_str(&format!(
+        "X-HDAP-Server-Time: {}\r\n",
+        hdap_core::time::unix_secs_utc()
+    ));
     head.push_str("Connection: close\r\n\r\n");
     let mut writer = BufWriter::new(stream);
     writer.write_all(head.as_bytes())?;
     writer.write_all(&resp.body)?;
     writer.flush()
+}
+
+/// Bounds the number of live worker threads. Excess connections are closed
+/// immediately, leaving backpressure to the OS listen backlog instead of
+/// exhausting memory with one thread per socket (AME-22).
+#[derive(Debug, Clone)]
+pub struct ConnectionLimiter {
+    limit: usize,
+    live: Arc<Mutex<usize>>,
+}
+
+impl ConnectionLimiter {
+    pub fn new(limit: usize) -> Self {
+        Self {
+            limit: limit.max(1),
+            live: Arc::new(Mutex::new(0)),
+        }
+    }
+
+    /// Reserve a slot, or return `false` when at capacity.
+    fn acquire(&self) -> bool {
+        let mut guard = match self.live.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        if *guard >= self.limit {
+            return false;
+        }
+        *guard += 1;
+        true
+    }
+
+    fn release(&self) {
+        let mut guard = match self.live.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        *guard = guard.saturating_sub(1);
+    }
+
+    /// Current number of in-flight connections.
+    pub fn live(&self) -> usize {
+        *self.live.lock().unwrap_or_else(|p| p.into_inner())
+    }
 }
 
 /// Serve `listener` in a thread-per-connection loop, dispatching to `handle`.
@@ -360,25 +417,51 @@ pub fn serve(
     max_body: usize,
     handle: impl Fn(Request) -> Response + Send + Sync + 'static,
 ) -> io::Result<()> {
-    let handle = std::sync::Arc::new(handle);
+    serve_with_limit(listener, max_body, ConnectionLimiter::new(256), handle)
+}
+
+/// Like [`serve`], with an explicit connection ceiling.
+pub fn serve_with_limit(
+    listener: TcpListener,
+    max_body: usize,
+    limiter: ConnectionLimiter,
+    handle: impl Fn(Request) -> Response + Send + Sync + 'static,
+) -> io::Result<()> {
+    let handle = Arc::new(handle);
     for conn in listener.incoming() {
-        let Ok(stream) = conn else { continue };
-        let handle = std::sync::Arc::clone(&handle);
+        let Ok(mut stream) = conn else { continue };
+        if !limiter.acquire() {
+            let _ = write_response(
+                &mut stream,
+                &Response::json(503, json_err_static("connection limit reached")),
+            );
+            continue;
+        }
+        let handle = Arc::clone(&handle);
+        let limiter = limiter.clone();
         std::thread::spawn(move || {
             let mut stream = stream;
             set_socket_deadlines(&stream);
-            let req = match read_request(&mut stream, max_body) {
+            let peer = stream.peer_addr().ok();
+            let mut req = match read_request(&mut stream, max_body) {
                 Ok(r) => r,
                 Err(_) => {
                     let _ = write_response(&mut stream, &Response::text(400, "bad request"));
+                    limiter.release();
                     return;
                 }
             };
+            req.peer = peer;
             let resp = handle(req);
             let _ = write_response(&mut stream, &resp);
+            limiter.release();
         });
     }
     Ok(())
+}
+
+fn json_err_static(msg: &str) -> String {
+    serde_json::json!({ "error": msg }).to_string()
 }
 
 /// Serve `listener` over TLS with a self-signed pinned node certificate
@@ -395,26 +478,52 @@ pub fn serve_tls(
     tls: std::sync::Arc<rustls::ServerConfig>,
     handle: impl Fn(Request) -> Response + Send + Sync + 'static,
 ) -> io::Result<()> {
-    let handle = std::sync::Arc::new(handle);
+    serve_tls_with_limit(listener, max_body, tls, ConnectionLimiter::new(256), handle)
+}
+
+/// Like [`serve_tls`], with an explicit connection ceiling.
+pub fn serve_tls_with_limit(
+    listener: TcpListener,
+    max_body: usize,
+    tls: std::sync::Arc<rustls::ServerConfig>,
+    limiter: ConnectionLimiter,
+    handle: impl Fn(Request) -> Response + Send + Sync + 'static,
+) -> io::Result<()> {
+    let handle = Arc::new(handle);
     for conn in listener.incoming() {
-        let Ok(stream) = conn else { continue };
-        let handle = std::sync::Arc::clone(&handle);
-        let tls = std::sync::Arc::clone(&tls);
+        let Ok(mut stream) = conn else { continue };
+        if !limiter.acquire() {
+            let _ = write_response(
+                &mut stream,
+                &Response::json(503, json_err_static("connection limit reached")),
+            );
+            continue;
+        }
+        let handle = Arc::clone(&handle);
+        let limiter = limiter.clone();
+        let tls = Arc::clone(&tls);
         std::thread::spawn(move || {
             set_socket_deadlines(&stream);
+            let peer = stream.peer_addr().ok();
             let mut stream = match hdap_tls::accept(&tls, stream) {
                 Ok(s) => s,
-                Err(_) => return,
-            };
-            let req = match read_request(&mut stream, max_body) {
-                Ok(r) => r,
                 Err(_) => {
-                    let _ = write_response(&mut stream, &Response::text(400, "bad request"));
+                    limiter.release();
                     return;
                 }
             };
+            let mut req = match read_request(&mut stream, max_body) {
+                Ok(r) => r,
+                Err(_) => {
+                    let _ = write_response(&mut stream, &Response::text(400, "bad request"));
+                    limiter.release();
+                    return;
+                }
+            };
+            req.peer = peer;
             let resp = handle(req);
             let _ = write_response(&mut stream, &resp);
+            limiter.release();
         });
     }
     Ok(())

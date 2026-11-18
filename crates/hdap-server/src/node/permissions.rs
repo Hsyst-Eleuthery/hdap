@@ -44,7 +44,10 @@ impl PermissionsModule {
                     if sig_bytes.len() != 64 {
                         return Response::json(400, json_err("invalid signature length"));
                     }
-                    let sig_arr: [u8; 64] = sig_bytes.as_slice().try_into().unwrap();
+                    let sig_arr: [u8; 64] = match sig_bytes.as_slice().try_into() {
+                        Ok(sig) => sig,
+                        Err(_) => return Response::json(400, json_err("invalid signature length")),
+                    };
                     let sig = Ed25519Signature::from_bytes(&sig_arr);
                     // Compute signature input before clearing signatures (the function
                     // requires the signature to be present at the given index).
@@ -55,9 +58,7 @@ impl PermissionsModule {
                         }
                     };
                     let owner_pub = match node
-                        .state
-                        .lock()
-                        .unwrap()
+                        .lock_state()
                         .users
                         .get(&user_id)
                         .and_then(|u| u.sign_pub_bytes())
@@ -78,7 +79,7 @@ impl PermissionsModule {
                     eprintln!("WARNING: adeia document accepted without signature (backward compatibility)");
                 }
 
-                let mut st = node.state.lock().unwrap();
+                let mut st = node.lock_state();
                 // The `adeia.hdap` document is the source of truth: it is what
                 // the directory shows and what federation ships to a mirroring
                 // pyle. Store it as a blob *and* refresh the ACL cache, so the
@@ -142,7 +143,7 @@ impl PermissionsModule {
             return Response::json(400, json_err("cannot transfer to yourself"));
         }
         let payload = transfer_payload(&old_owner, &new_owner, &targets);
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         let (Some(old_pub), Some(new_pub)) = (
             st.users.get(&old_owner).and_then(|u| u.sign_pub_bytes()),
             st.users.get(&new_owner).and_then(|u| u.sign_pub_bytes()),
@@ -293,7 +294,7 @@ mod tests {
     fn node_with_session(user_id: &str) -> Node {
         let node = Node::new(Config::default());
         {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             let seed = st.node_sign_seed;
             st.users.insert(
                 user_id.to_string(),
@@ -310,11 +311,12 @@ mod tests {
                     otp_anchor_hex: "cc".repeat(32),
                     otp_k: 1024,
                     created_at: 1_700_000_000,
+                    v2_f3: true,
                     home_pyle: "pyle-p".into(),
                 },
             );
             st.sessions.insert(
-                "tok".to_string(),
+                hdap_core::session_storage_key("tok"),
                 Session {
                     user_id: user_id.to_string(),
                     exp: u64::MAX,
@@ -333,11 +335,12 @@ mod tests {
             query: std::collections::BTreeMap::new(),
             headers,
             body: body.as_bytes().to_vec(),
+            peer: None,
         }
     }
 
     fn sign_adeia(node: &Node, owner: &str, text: &str) -> String {
-        let seed = node.state.lock().unwrap().node_sign_seed;
+        let seed = node.lock_state().node_sign_seed;
         let sign_key = hdap_core::crypto::SigningKey::from_bytes(&seed);
         let mut d = hdap_core::doc::parse(text).unwrap();
         let mut sig = Signature {
@@ -368,7 +371,7 @@ mod tests {
         let resp = node.permissions.handle_adeia(&node, &req(&signed_text));
         assert_eq!(resp.status, 200, "{}", String::from_utf8_lossy(&resp.body));
 
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         assert_eq!(
             st.permissions.get(owner).map(String::as_str),
             Some(signed_text.as_str())
@@ -389,7 +392,7 @@ mod tests {
             .permissions
             .handle_adeia(&node, &req("not a hdap document"));
         assert_eq!(resp.status, 400);
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         assert!(!st.permissions.contains_key(owner));
         assert!(!st.objects.contains_key(&State::key(owner, "adeia.hdap")));
     }

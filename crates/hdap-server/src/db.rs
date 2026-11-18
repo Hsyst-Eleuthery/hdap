@@ -21,7 +21,10 @@
 //!
 //! * `master_key` — every blob is sealed with it (`aead_seal`). A fresh key
 //!   per boot would turn the whole archive into unreadable bytes, so it is
-//!   generated once and then persisted like any other record.
+//!   generated once. In v2/Teleios it is stored in a separate, operator-owned
+//!   key file (`--master-key-file`); when configured, the DB row is redacted
+//!   so stealing the archive does not also steal the key. Legacy nodes without
+//!   a key file keep the v1 behaviour and emit a startup warning.
 //! * `mochthos_used` and `omphalos_step` — the replay guards. Losing them on
 //!   restart would let a mined band be farmed again and an OTP be replayed.
 //!
@@ -32,7 +35,8 @@
 //! rather than a half-applied one.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -40,6 +44,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::store::{
     Cession, MirrorOrigin, PeerRecord, ProklesisRecord, PrytaneionEntry, Session, State, UserRecord,
 };
+use hdap_core::crypto::sha256_hex;
 
 /// Bumped when a collection's shape changes. A node refuses to open a file
 /// written by a newer version rather than silently misreading it.
@@ -229,12 +234,28 @@ impl Meta {
             );
         }
 
+        // Migrate v1 plaintext session tokens to one-way storage keys. A token
+        // is a bearer credential: keeping it verbatim in the DB means a backup
+        // is a ready-to-use session. Hash on load; the next flush persists v2.
+        let sessions = self
+            .sessions
+            .into_iter()
+            .map(|(k, v)| {
+                let key = if hdap_core::is_session_storage_key(&k) {
+                    k
+                } else {
+                    hdap_core::session_storage_key(&k)
+                };
+                (key, v)
+            })
+            .collect();
+
         State {
             master_key,
             node_sign_seed,
             whoami: self.whoami,
             users: self.users,
-            sessions: self.sessions,
+            sessions,
             proklesis: self.proklesis,
             omphalos_step: self.omphalos_step,
             choregia: self.choregia,
@@ -277,11 +298,27 @@ pub struct Db {
     /// (hash, len) of each blob row as last written, so a flush only rewrites
     /// content that actually changed.
     blob_marks: Mutex<BTreeMap<String, (String, u64)>>,
+    /// Directory for out-of-band blob files (`<data>/objects/<hash>`). When
+    /// set, blobs are also written to individual files on disk so the OS page
+    /// cache can manage large content without inflating the SQLite BLOB.
+    /// Empty for in-memory databases.
+    blob_dir: PathBuf,
+    /// When set, the real blob-encryption key lives in an external key file.
+    /// `load` overrides the DB value with it and `flush` writes a redacted
+    /// placeholder instead, so a stolen DB never includes the key.
+    master_key_override: Option<[u8; 32]>,
 }
 
 impl Db {
-    /// Open (creating if needed) the node database at `path`.
+    /// Open (creating if needed) the node database at `path`, with the
+    /// legacy in-DB master key. Prefer `open_with_master_key` on new nodes.
     pub fn open(path: &Path) -> DbResult<Db> {
+        Self::open_with_master_key(path, None)
+    }
+
+    /// Open the database with an externally managed master key. The value in
+    /// the DB (if any) is ignored on load and redacted on every flush.
+    pub fn open_with_master_key(path: &Path, master_key: Option<[u8; 32]>) -> DbResult<Db> {
         if let Some(dir) = path.parent() {
             if !dir.as_os_str().is_empty() {
                 std::fs::create_dir_all(dir).map_err(|e| {
@@ -302,14 +339,25 @@ impl Db {
             conn: Mutex::new(conn),
             marks: Mutex::new(BTreeMap::new()),
             blob_marks: Mutex::new(BTreeMap::new()),
+            blob_dir: path
+                .parent()
+                .map(|p| p.join("objects"))
+                .unwrap_or_else(|| PathBuf::from("objects")),
+            master_key_override: master_key,
         };
         // Prime the blob marks from what is already on disk so the first
         // flush after a restart does not rewrite every stored byte.
         {
-            let conn = db.conn.lock().unwrap();
+            let conn = db
+                .conn
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             let mut stmt = conn.prepare("SELECT k, hash, len FROM blobs")?;
             let mut rows = stmt.query([])?;
-            let mut marks = db.blob_marks.lock().unwrap();
+            let mut marks = db
+                .blob_marks
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             while let Some(row) = rows.next()? {
                 let k: String = row.get(0)?;
                 let h: String = row.get(1)?;
@@ -322,6 +370,11 @@ impl Db {
 
     /// An in-memory database, for tests and for `--ephemeral`.
     pub fn open_memory() -> DbResult<Db> {
+        Self::open_memory_with_master_key(None)
+    }
+
+    /// In-memory database with an externally managed master key.
+    pub fn open_memory_with_master_key(master_key: Option<[u8; 32]>) -> DbResult<Db> {
         let conn = Connection::open_in_memory()?;
         conn.pragma_update(None, "journal_mode", "MEMORY")?;
         Self::init_schema(&conn)?;
@@ -329,7 +382,36 @@ impl Db {
             conn: Mutex::new(conn),
             marks: Mutex::new(BTreeMap::new()),
             blob_marks: Mutex::new(BTreeMap::new()),
+            blob_dir: PathBuf::new(),
+            master_key_override: master_key,
         })
+    }
+
+    /// Read just the persisted master key from an existing database, without
+    /// loading any blobs. Used once when migrating a v1 node to a key file.
+    /// Returns `None` for a fresh/absent DB or a redacted (all-zero) row.
+    pub fn peek_master_key(path: &Path) -> DbResult<Option<[u8; 32]>> {
+        if !path.exists() {
+            return Ok(None);
+        }
+        let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let raw: Option<Vec<u8>> = conn
+            .query_row("SELECT v FROM meta WHERE k = 'state'", [], |r| r.get(0))
+            .optional()?;
+        let Some(raw) = raw else {
+            return Ok(None);
+        };
+        #[derive(serde::Deserialize)]
+        struct KeyOnly {
+            #[serde(default)]
+            master_key: String,
+        }
+        let key: KeyOnly = serde_json::from_slice(&raw)
+            .map_err(|e| DbError::Corrupt(format!("estado ilegível: {e}")))?;
+        let decoded = hex::decode(&key.master_key)
+            .ok()
+            .and_then(|v| <[u8; 32]>::try_from(v).ok());
+        Ok(decoded.filter(|k| *k != [0u8; 32]))
     }
 
     fn init_schema(conn: &Connection) -> DbResult<()> {
@@ -354,7 +436,10 @@ impl Db {
     /// A brand-new node gets `fresh_master_key` so the caller can generate a
     /// key that will be written on the first flush.
     pub fn load(&self) -> DbResult<Option<State>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let raw: Option<Vec<u8>> = conn
             .query_row("SELECT v FROM meta WHERE k = 'state'", [], |r| r.get(0))
             .optional()?;
@@ -375,35 +460,58 @@ impl Db {
             let mut stmt = conn.prepare("SELECT k, hash, len, data FROM blobs")?;
             let mut rows = stmt.query([])?;
             while let Some(row) = rows.next()? {
-                blobs.insert(
-                    row.get::<_, String>(0)?,
-                    (
-                        row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)?,
-                        row.get::<_, Vec<u8>>(3)?,
-                    ),
-                );
+                let k: String = row.get(0)?;
+                let hash: String = row.get(1)?;
+                let len: i64 = row.get(2)?;
+                // Prefer the on-disk file copy so the OS page cache can manage
+                // large content without inflating the SQLite BLOB. Fall back
+                // to the BLOB for databases created before this change.
+                let data = if !self.blob_dir.as_os_str().is_empty() {
+                    let path = self.blob_dir.join(&hash);
+                    match self.read_blob_from_disk(&path, &hash, len as u64) {
+                        Some(data) => data,
+                        None => row.get::<_, Vec<u8>>(3)?,
+                    }
+                } else {
+                    row.get::<_, Vec<u8>>(3)?
+                };
+                blobs.insert(k, (hash, len, data));
             }
         }
-        Ok(Some(meta.into_state(blobs)))
+        let mut state = meta.into_state(blobs);
+        if let Some(key) = self.master_key_override {
+            state.master_key = key;
+        }
+        Ok(Some(state))
     }
 
     /// Mirror `st` into the database. One transaction; unchanged namespaces
     /// are skipped by fingerprint, and only content whose (hash, len) moved
     /// is rewritten.
     pub fn flush(&self, st: &State) -> DbResult<()> {
-        let meta = Meta::from_state(st);
+        let mut meta = Meta::from_state(st);
+        if self.master_key_override.is_some() {
+            // The key lives in the operator's key file. Persist a marker so a
+            // DB backup is useless without it; never the real key bytes.
+            meta.master_key = hex::encode([0u8; 32]);
+        }
         let raw = serde_json::to_vec(&meta)
             .map_err(|e| DbError::Corrupt(format!("estado não serializável: {e}")))?;
         let meta_mark = fingerprint(&raw);
 
         // Decide the work *before* taking the write lock, so a read-only
         // request that changed nothing never blocks the writer.
-        let mut marks = self.marks.lock().unwrap();
+        let mut marks = self
+            .marks
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if marks.get("state") == Some(&meta_mark) {
             return Ok(());
         }
-        let mut blob_marks = self.blob_marks.lock().unwrap();
+        let mut blob_marks = self
+            .blob_marks
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut blob_writes: Vec<(&String, &crate::store::Blob)> = Vec::new();
         for (k, b) in &st.objects {
             let want = (b.hash.clone(), b.bytes.len() as u64);
@@ -416,7 +524,10 @@ impl Db {
             .filter(|k| !st.objects.contains_key(*k))
             .collect();
 
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let tx = conn.transaction()?;
 
         for (k, b) in &blob_writes {
@@ -436,6 +547,39 @@ impl Db {
         )?;
         tx.commit()?;
 
+        // Also write each changed blob to an individual file on disk so the OS
+        // page cache can manage large content without inflating the SQLite
+        // BLOB. The SQLite row remains the source of truth for backward
+        // compatibility; the file is a secondary, faster-to-read copy. The
+        // file name is `<hash>` so the same content always maps to the same
+        // path, and `load` prefers the file when present.
+        if !self.blob_dir.as_os_str().is_empty() {
+            let _ = std::fs::create_dir_all(&self.blob_dir);
+            for (_, b) in &blob_writes {
+                let path = self.blob_dir.join(&b.hash);
+                // Write to temp file first, fsync, then atomic rename so we
+                // never leave a partial or corrupt blob on disk.
+                let tmp_path = self.blob_dir.join(format!(".{}.tmp", b.hash));
+                let mut tmp_file = std::fs::File::create(&tmp_path)
+                    .map_err(|e| DbError::Corrupt(format!("cannot write blob temp file: {e}")))?;
+                tmp_file
+                    .write_all(&b.bytes)
+                    .map_err(|e| DbError::Corrupt(format!("cannot write blob temp file: {e}")))?;
+                tmp_file
+                    .sync_all()
+                    .map_err(|e| DbError::Corrupt(format!("cannot sync blob temp file: {e}")))?;
+                std::fs::rename(&tmp_path, &path)
+                    .map_err(|e| DbError::Corrupt(format!("cannot rename blob temp file: {e}")))?;
+            }
+            // Remove on-disk copies of deleted blobs (best effort). The hash
+            // is still in `blob_marks` until we clear it below.
+            for k in &blob_deletes {
+                if let Some((hash, _)) = blob_marks.get(*k) {
+                    let _ = std::fs::remove_file(self.blob_dir.join(hash));
+                }
+            }
+        }
+
         marks.insert("state".to_string(), meta_mark);
         // Snapshot the writes before mutating: the vectors borrow `st`, and
         // holding two mutable borrows of `blob_marks` at once is a borrowck
@@ -454,28 +598,69 @@ impl Db {
         Ok(())
     }
 
-    /// Bytes on disk (blobs + metadata), for `/health` and for tests.
+    /// Read a blob from disk, validating that its hash and length match.
+    /// Returns None if the file is missing, corrupt, or doesn't match,
+    /// so the caller can fall back to the SQLite BLOB.
+    fn read_blob_from_disk(
+        &self,
+        path: &std::path::Path,
+        expected_hash: &str,
+        expected_len: u64,
+    ) -> Option<Vec<u8>> {
+        let data = std::fs::read(path).ok()?;
+        if data.len() as u64 != expected_len {
+            return None;
+        }
+        // Verify hash matches
+        let actual_hash = sha256_hex(&data);
+        if actual_hash != expected_hash {
+            return None;
+        }
+        Some(data)
+    }
+
+    /// Bytes on disk (blobs + metadata + on-disk blob files), for `/health`
+    /// and for tests.
     pub fn size_bytes(&self) -> DbResult<u64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let total: i64 = conn.query_row(
             "SELECT COALESCE((SELECT SUM(len) FROM blobs), 0)
                   + COALESCE((SELECT SUM(LENGTH(v)) FROM meta), 0)",
             [],
             |r| r.get(0),
         )?;
-        Ok(total as u64)
+        let mut total = total as u64;
+        if !self.blob_dir.as_os_str().is_empty() {
+            if let Ok(entries) = std::fs::read_dir(&self.blob_dir) {
+                for entry in entries.flatten() {
+                    if let Ok(meta) = entry.metadata() {
+                        total = total.saturating_add(meta.len());
+                    }
+                }
+            }
+        }
+        Ok(total)
     }
 
     /// Number of content rows, for tests that assert on durability.
     pub fn blob_count(&self) -> DbResult<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         Ok(conn.query_row("SELECT COUNT(*) FROM blobs", [], |r| r.get(0))?)
     }
 
     /// Force a WAL checkpoint so everything is in the main database file.
     /// Useful before a clean shutdown or when copying the node directory.
     pub fn checkpoint(&self) -> DbResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
         Ok(())
     }
@@ -499,6 +684,7 @@ mod tests {
             otp_anchor_hex: "cc".repeat(32),
             otp_k: 1024,
             created_at: 1_700_000_000,
+            v2_f3: true,
             home_pyle: "node-a".into(),
         }
     }
@@ -512,7 +698,7 @@ mod tests {
             user("jose_0123456789abcdef"),
         );
         st.sessions.insert(
-            "tok".into(),
+            hdap_core::session_storage_key("tok"),
             Session {
                 user_id: "jose_0123456789abcdef".into(),
                 exp: 42,
@@ -577,6 +763,7 @@ mod tests {
                 origin_server: "pyle-a".into(),
                 origin_user: "jose_0123456789abcdef".into(),
                 origin_user_pubkey: "aa".repeat(32),
+                namespace_owner: "jose_0123456789abcdef".into(),
                 origin_path: "docs/a.txt".into(),
                 sphragis: "sig".into(),
                 replicas: vec!["pyle-a:key".into()],
@@ -819,7 +1006,10 @@ mod tests {
                 transfers: BTreeMap::new(),
             };
             let raw = serde_json::to_vec(&meta).unwrap();
-            let conn = db.conn.lock().unwrap();
+            let conn = db
+                .conn
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             conn.execute("INSERT INTO meta (k, v) VALUES ('state', ?1)", params![raw])
                 .expect("seed");
         }
@@ -870,7 +1060,10 @@ mod tests {
         });
         {
             let db = Db::open(&path).expect("open");
-            let conn = db.conn.lock().unwrap();
+            let conn = db
+                .conn
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             conn.execute(
                 "INSERT INTO meta (k, v) VALUES ('state', ?1)",
                 params![serde_json::to_vec(&older).unwrap()],
@@ -942,7 +1135,10 @@ mod tests {
                 let mut st = State::default();
                 populated(&mut st);
                 db.flush(&st).expect("flush");
-                let conn = db.conn.lock().unwrap();
+                let conn = db
+                    .conn
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
                 conn.execute(sql, []).expect("tamper");
             }
             let db = Db::open(&path).expect("reopen");
@@ -953,6 +1149,81 @@ mod tests {
             );
             let _ = std::fs::remove_dir_all(&dir);
         }
+    }
+
+    /// v2: with an external key file the DB must never contain the real key,
+    /// yet a reopen with the same key must still decrypt every blob.
+    #[test]
+    fn external_master_key_is_never_written_to_the_db() {
+        let dir = tempdir("external-key");
+        let path = dir.join("node.db");
+        let key = [0x5au8; 32];
+
+        let st = State {
+            master_key: key,
+            ..Default::default()
+        };
+        {
+            let db = Db::open_with_master_key(&path, Some(key)).expect("open");
+            db.flush(&st).expect("flush");
+        }
+        assert_eq!(
+            Db::peek_master_key(&path).expect("peek"),
+            None,
+            "a redacted DB must not reveal the key"
+        );
+        {
+            let db = Db::open_with_master_key(&path, Some(key)).expect("reopen");
+            let back = db.load().expect("load").expect("state");
+            assert_eq!(back.master_key, key);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Legacy plaintext tokens are converted to one-way keys on load, so an
+    /// old backup cannot be replayed as a live session after upgrading.
+    #[test]
+    fn legacy_session_tokens_are_hashed_on_load() {
+        let dir = tempdir("session-migration");
+        let path = dir.join("node.db");
+        {
+            let db = Db::open(&path).expect("open");
+            // Write the v1 shape directly, bypassing today's `Meta::from_state`.
+            let mut meta = serde_json::json!({
+                "schema_version": SCHEMA_VERSION,
+                "master_key": hex::encode([1u8; 32]),
+                "node_sign_seed": hex::encode([2u8; 32]),
+                "whoami": "node-a",
+                "users": {},
+                "sessions": { "raw-bearer-token": { "user_id": "u", "exp": 42 } },
+                "proklesis": {}, "omphalos_step": {}, "choregia": {},
+                "stored": {}, "mochthos_used": [], "object_index": {},
+                "prytaneion": {}, "pheme": {}, "permissions": {}, "ceessions": {},
+                "kerux": {}, "kerux_owner": {}, "timi": {}, "peers": {}, "fed_nonces": {}
+            });
+            // Keep the JSON valid even if extra empty maps were dropped above.
+            meta.as_object_mut()
+                .unwrap()
+                .insert("band_objects".into(), serde_json::json!({}));
+            meta.as_object_mut()
+                .unwrap()
+                .insert("band_windows".into(), serde_json::json!({}));
+            let conn = db
+                .conn
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            conn.execute(
+                "INSERT INTO meta (k, v) VALUES ('state', ?1)",
+                params![serde_json::to_vec(&meta).unwrap()],
+            )
+            .expect("seed");
+        }
+        let db = Db::open(&path).expect("reopen");
+        let st = db.load().expect("load").expect("state");
+        let expected = hdap_core::session_storage_key("raw-bearer-token");
+        assert!(st.sessions.contains_key(&expected));
+        assert!(!st.sessions.contains_key("raw-bearer-token"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn tempdir(tag: &str) -> std::path::PathBuf {

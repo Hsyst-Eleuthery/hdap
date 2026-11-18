@@ -272,12 +272,18 @@ impl PinVerifier {
 
     /// The last-accepted pin (usable after a TOFU handshake).
     pub fn observed(&self) -> Option<String> {
-        self.expected.lock().unwrap().clone()
+        self.expected
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 
     fn check(&self, cert: &CertificateDer<'_>) -> Result<(), rustls::Error> {
         let pin = cert_pin(cert);
-        let mut guard = self.expected.lock().unwrap();
+        let mut guard = self
+            .expected
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(exp) = guard.as_ref() {
             if *exp != pin {
                 return Err(rustls::Error::General(

@@ -6,15 +6,32 @@ pub mod auth;
 pub mod crypto;
 pub mod doc;
 pub mod identity;
+pub mod mnemonic;
 pub mod pow;
 pub mod protocol;
+pub mod time;
 pub mod uri;
 pub mod vault;
 
-pub use auth::{session_token, verify_possession, AuthProof, Challenge, SessionToken};
-pub use crypto::{seal_to_pub, sha256, sha256_hex};
+/// Geração do protocolo. O formato dos documentos permanece `FORMAT_VERSION`
+/// para compatibilidade; esta constante identifica a versão de interoperabilidade
+/// anunciada por `/health` na v2 (Téleia vási / Teleios).
+pub const PROTOCOL_VERSION: u64 = 2;
+/// Nome legível da geração do protocolo.
+pub const PROTOCOL_CODENAME: &str = "Teleios";
+
+pub use auth::{
+    derive_shared_key, is_session_storage_key, omphalos_rotation_text, prove_session_secret,
+    prove_session_secret_bound, session_storage_key, session_token, verify_knowledge_bounded,
+    verify_possession, AuthProof, Challenge, OtpWitness, SessionToken,
+};
+pub use crypto::{
+    hkdf_sha256, seal_to_pub, sha256, sha256_hex, KDF_INFO_ECIES, KDF_INFO_OTP, KDF_INFO_SESSION,
+    MAX_OTP_CHAIN_LEN,
+};
 pub use doc::{parse, Doc, DocType, ParseError, Signature, FORMAT_VERSION, MAGIC};
 pub use identity::{Identity, IDENTITY_USER_PREFIX};
+pub use mnemonic::{RecoveryError, RecoveryPhrase, RECOVERY_VERSION};
 pub use pow::{solve_pow, verify_pow, PowProof};
 pub use protocol::{
     adeia_doc_with_diadosi, house_move_payload, sig_to_b64, transfer_payload, DiadosiDoc,
@@ -23,5 +40,6 @@ pub use protocol::{
     TransferTarget, TRANSFER_KIND_ACCEPT, TRANSFER_KIND_REQUEST, TRANSFER_TARGET_DIR,
     TRANSFER_TARGET_FILE, TRANSFER_TARGET_IDENTITY,
 };
+pub use time::{client_ts_matches, clock_skew_within, is_expired, unix_secs_utc};
 pub use uri::parse_access_uri;
 pub use vault::{Vault, VaultSecrets};

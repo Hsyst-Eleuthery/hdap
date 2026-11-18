@@ -22,7 +22,7 @@ impl MatrixModule {
         let Some(hash) = req.query.get("hash") else {
             return Response::json(400, json_err("hash query required"));
         };
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         match st.prytaneion.get(hash) {
             Some(e) => Response::bytes(
                 200,
@@ -52,7 +52,7 @@ impl MatrixModule {
         if (replica.is_none() && deletion.is_none()) || hash.is_empty() {
             return Response::json(400, json_err("content_hash + replica or deletion required"));
         }
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         let created_at = now;
         let pubkey = st
             .users
@@ -67,6 +67,7 @@ impl MatrixModule {
                 origin_server: self.cfg.server_id.clone(),
                 origin_user: user_id.clone(),
                 origin_user_pubkey: pubkey,
+                namespace_owner: user_id.clone(),
                 origin_path: String::new(),
                 sphragis: String::new(),
                 replicas: vec![],
@@ -92,7 +93,7 @@ impl MatrixModule {
 
     /// `GET /pheme` — read reputation scores.
     pub fn handle_pheme_read(&self, node: &crate::node::Node, _req: &Request) -> Response {
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         let for_json: Vec<Value> = st
             .pheme
             .iter()
@@ -121,7 +122,7 @@ impl MatrixModule {
             .get("SCORE_DELTA")
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         let score = st.pheme.get(&target).copied().unwrap_or(0) + delta;
         st.pheme.insert(target.clone(), score);
         Response::json(
@@ -142,7 +143,7 @@ impl MatrixModule {
         if alias.is_empty() {
             return Response::json(400, json_err("alias required"));
         }
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         match st.kerux.get(&alias) {
             Some(uri) => Response::json(
                 200,
@@ -166,7 +167,7 @@ impl MatrixModule {
         if alias.is_empty() || uri.is_empty() {
             return Response::json(400, json_err("alias and uri required"));
         }
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         st.kerux.insert(alias.to_string(), uri.to_string());
         st.kerux_owner
             .insert(alias.to_string(), user_id.to_string());
@@ -175,7 +176,7 @@ impl MatrixModule {
 
     /// `GET /timi` — list price announcements.
     pub fn handle_timi_read(&self, node: &crate::node::Node, _req: &Request) -> Response {
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         let for_json: Vec<Value> = st
             .timi
             .iter()
@@ -238,7 +239,7 @@ impl MatrixModule {
         {
             return Response::json(400, json_err("timi doc missing numeric fields"));
         }
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         st.timi.insert(pyle, text.to_string());
         Response::json(200, serde_json::json!({ "timi": "updated" }).to_string())
     }

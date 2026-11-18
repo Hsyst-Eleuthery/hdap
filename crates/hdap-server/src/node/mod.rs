@@ -12,6 +12,7 @@
 
 pub mod auth;
 pub mod bandwidth;
+pub mod cleanup;
 pub mod discovery;
 pub mod federation;
 pub mod identity;
@@ -37,11 +38,12 @@ use transfer::TransferModule;
 
 use crate::config::Config;
 use crate::http::{Request, Response};
+use crate::motd::{self, MotdContext};
 use crate::store::State as StoreState;
+use hdap_core::time::{is_expired, unix_secs_utc};
 use rand_core::RngCore;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use hdap_core::doc::parse as parse_doc;
@@ -57,6 +59,15 @@ pub enum Access {
 
 fn json_err(msg: &str) -> String {
     serde_json::json!({ "error": msg }).to_string()
+}
+
+/// Recover a poisoned auxiliary mutex instead of panicking the whole node.
+/// Panicking inside a worker thread must never take down the server.
+pub(crate) fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
 }
 
 fn require_json(body: &[u8]) -> Result<serde_json::Value, Response> {
@@ -82,8 +93,58 @@ pub fn mochthos_challenge(server_id: &str) -> String {
     format!("hdap-mochthos:{server_id}")
 }
 
-pub const SERVER_INTEGRITY_TAG: &str = "hdap-server/v1";
+pub const SERVER_INTEGRITY_TAG: &str = "hdap-server/v2";
 pub const SEAL_OVERHEAD: usize = 12 + 16;
+
+/// Dirty/clean signal for persistence that cannot lose a concurrent update.
+///
+/// An `AtomicBool` is not sufficient: request A can clear the flag while
+/// request B is marking it dirty, silently dropping B's signal. Here
+/// `generation` counts mutations and `persisted` records the generation
+/// covered by the last successful flush. A flush captures the generation
+/// *before* snapshotting state and only advances `persisted` to that captured
+/// value, so any mutation arriving during the flush remains pending for the
+/// next one.
+#[derive(Debug, Default)]
+pub(crate) struct PersistSignal {
+    generation: AtomicU64,
+    persisted: AtomicU64,
+}
+
+impl PersistSignal {
+    /// Mark state as dirty. Call only after the mutation is applied to state,
+    /// so a flush capturing this generation cannot miss that mutation.
+    pub fn mark_dirty(&self) {
+        self.generation.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// True when at least one mutation is not known to be on disk.
+    pub fn needs_flush(&self) -> bool {
+        self.generation.load(Ordering::Acquire) != self.persisted.load(Ordering::Acquire)
+    }
+
+    /// Generation covered by the flush that is about to start.
+    fn begin_flush(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
+    }
+
+    /// Record a successful flush. Never moves `persisted` backwards, so an
+    /// older flush cannot swallow a newer `mark_dirty`.
+    fn end_flush(&self, generation: u64) {
+        let mut current = self.persisted.load(Ordering::Acquire);
+        while generation > current {
+            match self.persisted.compare_exchange_weak(
+                current,
+                generation,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return,
+                Err(actual) => current = actual,
+            }
+        }
+    }
+}
 
 /// A node: owns a `State`, a clock and config; demuxes HTTP requests.
 pub struct Node {
@@ -102,6 +163,17 @@ pub struct Node {
     pub advertise_endpoint: Option<String>,
     /// Wall-clock for deterministic tests; uses system time when 0.
     clock: Arc<AtomicU64>,
+    /// Set when a lock was found poisoned. Requests then get a clean 503
+    /// instead of a cascade of panics (AME-06).
+    lock_poisoned: AtomicBool,
+    /// Unix UTC seconds when this process started (used by Ángelma uptime).
+    started_at: u64,
+    /// Mutations that must reach disk before the request is answered. This
+    /// includes nonce consumption in `fed_verify_peer` (which may happen on a
+    /// GET that later returns 401) and TOFU pins learned during an outbound
+    /// federation call. A generation counter, not a shared bool, so concurrent
+    /// requests cannot erase each other's dirty signal.
+    dirty: PersistSignal,
 
     // Submodules
     auth: AuthModule,
@@ -150,6 +222,9 @@ impl Node {
             tls_pin: None,
             db: None,
             advertise_endpoint: None,
+            lock_poisoned: AtomicBool::new(false),
+            dirty: PersistSignal::default(),
+            started_at: unix_secs_utc(),
             auth: AuthModule::new(cfg.clone()),
             bandwidth: BandwidthModule::new(cfg.clone()),
             federation: FederationModule::new(cfg.clone()),
@@ -182,17 +257,75 @@ impl Node {
         }
     }
 
+    /// Acquire the global state lock without ever panicking. A poisoned mutex
+    /// means a task panicked while holding it; we recover the guard (so the
+    /// node keeps serving) and flag the node as degraded so `handle` returns a
+    /// clean 503 instead of hundreds of panics.
+    pub fn lock_state(&self) -> MutexGuard<'_, StoreState> {
+        match self.state.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                self.lock_poisoned.store(true, Ordering::Release);
+                crate::hlog!(error, "lock", "state mutex poisoned; node degraded");
+                poisoned.into_inner()
+            }
+        }
+    }
+
+    /// Live facts used by the Ángelma (MOTD) renderer.
+    pub fn motd_context(&self) -> MotdContext {
+        let now = self.now();
+        let st = self.lock_state();
+        MotdContext {
+            server_id: self.cfg.server_id.clone(),
+            version: env!("CARGO_PKG_VERSION"),
+            protocol_version: hdap_core::PROTOCOL_VERSION,
+            protocol_codename: hdap_core::PROTOCOL_CODENAME,
+            started_at: self.started_at,
+            now,
+            users: st.users.len(),
+            files: st.objects.len(),
+            sessions: st.sessions.len(),
+            peers: st.peers.len(),
+            tls: self.tls_pin.is_some(),
+            rate_limit_per_sec: self.cfg.rate_limit_per_sec,
+        }
+    }
+
+    /// Ángelma rendered with the current node state.
+    pub fn motd(&self) -> String {
+        motd::render(&self.cfg.motd, &self.motd_context())
+    }
+
     /// Dispatch a request to the matching handler.
     pub fn handle(&self, req: &Request) -> Response {
+        if self.lock_poisoned.load(Ordering::Acquire) {
+            return Response::json(503, json_err("node degraded: state lock poisoned"));
+        }
         if self.rate_limited(req) {
             return Response::json(429, json_err("rate limit exceeded"));
         }
         let mutating = matches!(req.method.as_str(), "POST" | "DELETE" | "PUT");
         let resp = self.dispatch(req);
+        // Mark only after the mutation is in the state: a flush that captures
+        // this generation is then guaranteed to include the change. Marking
+        // before `dispatch` would let a concurrent flush cover a generation
+        // whose mutation had not happened yet, losing that upload.
+        if mutating {
+            self.dirty.mark_dirty();
+        }
         // AME-35: a mutating request is answered only after its effect is on
         // disk. The fingerprint inside `flush` makes a no-op POST cheap, so
         // this stays correct even for read-only POSTs (proklesis, etc.).
-        if mutating && self.db.is_some() && (200..300).contains(&resp.status) {
+        // AME-XX: nonce consumption by `fed_verify_peer` must also persist,
+        // even on a GET that later returns 401. A TOFU pin learned during an
+        // outbound federation call is dirty too. The generation counter keeps
+        // these signals when several requests race: clearing a bool here
+        // could erase another request's pending write.
+        if crate::fed_client::take_tofu_dirty() {
+            self.dirty.mark_dirty();
+        }
+        if self.dirty.needs_flush() && self.db.is_some() {
             if let Err(e) = self.persist() {
                 return Response::json(500, json_err(&format!("persist failed: {e}")));
             }
@@ -204,12 +337,10 @@ impl Node {
         let method = req.method.as_str();
         let mut parts = req.path.trim_start_matches('/').splitn(3, '/');
         let primary = parts.next().unwrap_or("");
-        eprintln!(
-            "DISPATCH: method={} path={} primary={}",
-            method, req.path, primary
-        );
+        crate::hlog!(debug, "http", "{} {}", method, primary);
         match (method, primary) {
             ("GET", "health") => self.handle_health(),
+            ("GET", "motd") => self.handle_motd(),
             ("GET", "bubble") => self.discovery.handle_bubble(self, req),
             ("GET", "pyle") => {
                 if parts.next() == Some("integrity") {
@@ -291,13 +422,23 @@ impl Node {
         if self.cfg.rate_limit_per_sec == 0 {
             return false;
         }
+        // The bucket key comes from the kernel's peer address, never from a
+        // client-written header. A spoofable label used to let abusers escape
+        // the limit while honest clients shared one bucket (AME-21).
         let key = req
-            .headers
-            .get("x-hdap-peer")
-            .cloned()
-            .unwrap_or_else(|| "local".to_string());
+            .peer
+            .map(|addr| addr.ip().to_string())
+            .unwrap_or_else(|| "direct".to_string());
         let now = self.now();
-        let mut st = self.state.lock().unwrap();
+        let mut st = self.lock_state();
+        // Reclaim buckets that have been idle for a while so a rotating source
+        // port/IP cannot grow this map without bound.
+        if st.rate.len() > 4096 {
+            st.rate.retain(|_, q| !q.is_empty());
+            if st.rate.len() > 4096 {
+                st.rate.clear();
+            }
+        }
         let bucket = st.rate.entry(key).or_default();
         while bucket.front().is_some_and(|t| now.saturating_sub(*t) >= 1) {
             bucket.pop_front();
@@ -311,10 +452,11 @@ impl Node {
 
     fn handle_health(&self) -> Response {
         let node_sign_pub = {
-            let seed = self.state.lock().unwrap().node_sign_seed;
+            let seed = self.lock_state().node_sign_seed;
             let key = ed25519_dalek::SigningKey::from_bytes(&seed);
             hex::encode(key.verifying_key().to_bytes())
         };
+        let ctx = self.motd_context();
         let mut body = serde_json::json!({
             "status": "ok",
             "server_id": self.cfg.server_id,
@@ -322,11 +464,34 @@ impl Node {
             "node_sign_pub": node_sign_pub,
             "pylaia_required": self.cfg.require_entry_pow,
             "pylaia_target": self.cfg.pylaia_target,
+            "protocol_version": hdap_core::PROTOCOL_VERSION,
+            "protocol_codename": hdap_core::PROTOCOL_CODENAME,
+            "version": env!("CARGO_PKG_VERSION"),
+            "time_utc": ctx.now,
+            "date_utc": motd::format_unix_utc(ctx.now),
+            "uptime_secs": ctx.now.saturating_sub(ctx.started_at),
+            "users": ctx.users,
+            "files": ctx.files,
+            "motd": motd::render(&self.cfg.motd, &ctx),
         });
         if let Some(pin) = &self.tls_pin {
             body["tls_pin"] = serde_json::json!(pin);
         }
         Response::json(200, body.to_string())
+    }
+
+    /// `GET /motd` — Ángelma, the server's message of the day.
+    fn handle_motd(&self) -> Response {
+        let ctx = self.motd_context();
+        Response::json(
+            200,
+            serde_json::json!({
+                "motd": motd::render(&self.cfg.motd, &ctx),
+                "time_utc": ctx.now,
+                "server_id": ctx.server_id,
+            })
+            .to_string(),
+        )
     }
 
     fn handle_integrity(&self) -> Response {
@@ -346,9 +511,12 @@ impl Node {
                 .get("authorization")
                 .and_then(|v| v.strip_prefix("Bearer ").map(|s| s.to_string()))
         })?;
-        let st = self.state.lock().unwrap();
-        let sess = st.sessions.get(&token)?;
-        if sess.exp < self.now() {
+        // v2 stores only a one-way hash of the token, so the DB never carries
+        // a replayable credential. Legacy plaintext rows are migrated on load.
+        let key = hdap_core::session_storage_key(&token);
+        let st = self.lock_state();
+        let sess = st.sessions.get(&key)?;
+        if is_expired(self.now(), sess.exp) {
             return None;
         }
         Some(sess.user_id.clone())
@@ -362,7 +530,7 @@ impl Node {
         if matches!(need, Access::Read) && is_public_identity_doc(path) {
             return true;
         }
-        let st = self.state.lock().unwrap();
+        let st = self.lock_state();
         if requester == owner {
             // A completed transfer is an irrevocable read-only cession for the
             // cedente (§11.3). `adeia` edits cannot buy write access back.
@@ -395,7 +563,7 @@ impl Node {
         }
         let key = StoreState::key(owner, path);
         let snapshot = {
-            let st = self.state.lock().unwrap();
+            let st = self.lock_state();
             st.replica_acls.get(&key).cloned()
         };
         let Some(acl) = snapshot else {
@@ -414,7 +582,7 @@ impl Node {
         if is_public_identity_doc(path) {
             return true;
         }
-        let st = self.state.lock().unwrap();
+        let st = self.lock_state();
         st.permissions
             .get(owner)
             .or_else(|| {
@@ -557,9 +725,9 @@ fn path_in_scope(path: &str, scope: &str) -> bool {
 /// Attach a durable store and load whatever it already holds.
 impl Node {
     pub fn with_db(&mut self, db: Arc<crate::db::Db>) -> crate::db::DbResult<()> {
-        self.state.lock().unwrap().whoami = self.cfg.server_id.clone();
+        self.lock_state().whoami = self.cfg.server_id.clone();
         let restored = db.load()?;
-        let mut st = self.state.lock().unwrap();
+        let mut st = self.lock_state();
         match restored {
             Some(loaded) => {
                 let mut loaded = loaded;
@@ -579,8 +747,42 @@ impl Node {
                 st.node_sign_seed = seed;
             }
         }
+        drop(st);
+
+        // Pins restored from the database (and any operator-configured pins)
+        // seed the process-wide TOFU registry. Without this, a restarted node
+        // would forget a learned pin and accept a different certificate on the
+        // next outbound connection.
+        let mut seeded: Vec<(String, String)> = {
+            let st = self.lock_state();
+            st.peers
+                .values()
+                .filter_map(|p| Some((p.endpoint.clone(), p.tls_pin.clone()?)))
+                .collect()
+        };
+        seeded.extend(
+            self.cfg
+                .federation_peers
+                .values()
+                .filter_map(|p| Some((p.endpoint.clone(), p.tls_pin.clone()?))),
+        );
+        for (endpoint, pin) in seeded {
+            crate::fed_client::seed_tofu_pin(&endpoint, &pin);
+        }
+
         self.db = Some(db);
         Ok(())
+    }
+
+    /// Copy process-wide TOFU pins into the durable peer records.
+    fn absorb_tofu_pins(&self, st: &mut StoreState) {
+        for (endpoint, pin) in crate::fed_client::learned_tofu_pins() {
+            for peer in st.peers.values_mut() {
+                if peer.endpoint == endpoint && peer.tls_pin.as_deref() != Some(pin.as_str()) {
+                    peer.tls_pin = Some(pin.clone());
+                }
+            }
+        }
     }
 
     /// Persist the current state to the attached database.
@@ -589,8 +791,14 @@ impl Node {
             .db
             .as_ref()
             .ok_or_else(|| crate::db::DbError::Corrupt("no database attached".to_string()))?;
-        let st = self.state.lock().unwrap();
-        db.flush(&st)
+        // Capture the generation before taking the state lock: a mutation
+        // marked dirty after this point stays pending for the next flush.
+        let generation = self.dirty.begin_flush();
+        let mut st = self.lock_state();
+        self.absorb_tofu_pins(&mut st);
+        db.flush(&st)?;
+        self.dirty.end_flush(generation);
+        Ok(())
     }
 }
 
@@ -609,7 +817,7 @@ pub(crate) fn notify_deletion(
     skip: Option<&str>,
 ) -> usize {
     let (node_id, sign_key, peers) = {
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         let ids = st.watchers.get(owner).cloned().unwrap_or_default();
         let peers: Vec<_> = ids
             .iter()
@@ -623,12 +831,13 @@ pub(crate) fn notify_deletion(
         )
     };
     let provenance = {
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         st.prytaneion.get(content_hash).map(|e| {
             (
                 e.origin_user_pubkey.clone(),
                 e.origin_path.clone(),
                 e.sphragis.clone(),
+                e.namespace_owner.clone(),
             )
         })
     };
@@ -641,6 +850,7 @@ pub(crate) fn notify_deletion(
         "origin_user_pubkey": provenance.as_ref().map(|p| p.0.as_str()).unwrap_or(""),
         "origin_path": provenance.as_ref().map(|p| p.1.as_str()).unwrap_or(path),
         "sphragis": provenance.as_ref().map(|p| p.2.as_str()).unwrap_or(""),
+        "namespace_owner": provenance.as_ref().map(|p| p.3.as_str()).unwrap_or(owner),
     })
     .to_string();
     let mut notified = 0;
@@ -672,6 +882,7 @@ mod tests {
             query: BTreeMap::new(),
             headers: BTreeMap::new(),
             body: Vec::new(),
+            peer: None,
         }
     }
 
@@ -705,7 +916,7 @@ mod tests {
         .render();
         let new_private = adeia_doc(owner, 2, Some("prev".into()), 1000, &[], None).render();
         {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             st.permissions.insert(owner.to_string(), new_private);
             st.replica_acls
                 .insert(StoreState::key(owner, path), old_public);
@@ -755,7 +966,7 @@ mod tests {
         ];
         let acl = adeia_doc(owner, 1, None, 900, &perms, None).render();
         {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             st.permissions.insert(owner.into(), acl);
         }
 
@@ -812,7 +1023,7 @@ mod tests {
         let white_acl =
             adeia_doc_with_diadosi(owner, 1, None, 900, &allow_reader, None, Some(&white)).render();
         {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             st.permissions.insert(owner.into(), white_acl);
         }
         assert!(
@@ -827,7 +1038,7 @@ mod tests {
         let black_acl =
             adeia_doc_with_diadosi(owner, 1, None, 900, &allow_reader, None, Some(&black)).render();
         {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             st.permissions.insert(owner.into(), black_acl.clone());
             st.replica_acls
                 .insert(StoreState::key(owner, path), black_acl);
@@ -860,7 +1071,7 @@ mod tests {
                 ..Config::default()
             });
             node.with_db(db).unwrap();
-            node.state.lock().unwrap().users.insert(
+            node.lock_state().users.insert(
                 "jose_0123456789abcdef".into(),
                 UserRecord {
                     user_id: "jose_0123456789abcdef".into(),
@@ -871,6 +1082,7 @@ mod tests {
                     otp_anchor_hex: "cc".repeat(32),
                     otp_k: 1024,
                     created_at: 1_700_000_000,
+                    v2_f3: true,
                     home_pyle: "pyle-p".into(),
                 },
             );
@@ -890,5 +1102,72 @@ mod tests {
             "a registered user must survive a restart"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A TOFU pin learned by an outbound client must reach the peer's durable
+    /// record, so a restarted node keeps enforcing it.
+    #[test]
+    fn learned_tofu_pin_is_persisted_in_peer_record() {
+        let dir = std::env::temp_dir().join(format!("hdap-tofu-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("n.db");
+        const ENDPOINT: &str = "203.0.113.19:9443";
+
+        {
+            let db = std::sync::Arc::new(crate::db::Db::open(&path).unwrap());
+            let mut node = Node::new(Config::default());
+            node.with_db(db).unwrap();
+            node.lock_state().peers.insert(
+                "pyle-tofu".into(),
+                crate::store::PeerRecord {
+                    node_id: "pyle-tofu".into(),
+                    sign_pub_hex: "00".repeat(32),
+                    endpoint: ENDPOINT.into(),
+                    tls_pin: None,
+                },
+            );
+            crate::fed_client::seed_tofu_pin(ENDPOINT, "sha256:learnedpin");
+            node.persist().unwrap();
+            assert_eq!(
+                node.lock_state().peers["pyle-tofu"].tls_pin.as_deref(),
+                Some("sha256:learnedpin"),
+                "persist must absorb the learned pin into the peer record"
+            );
+        }
+
+        let back = crate::db::Db::open(&path)
+            .unwrap()
+            .load()
+            .unwrap()
+            .expect("state persisted");
+        assert_eq!(
+            back.peers["pyle-tofu"].tls_pin.as_deref(),
+            Some("sha256:learnedpin")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A concurrent dirty mark must not be swallowed by an in-flight flush.
+    #[test]
+    fn persist_signal_keeps_concurrent_dirty_marks() {
+        let signal = PersistSignal::default();
+        assert!(!signal.needs_flush());
+
+        signal.mark_dirty();
+        let first = signal.begin_flush();
+        assert!(signal.needs_flush());
+
+        // A second request consumes a nonce while the first flush is running.
+        signal.mark_dirty();
+        signal.end_flush(first);
+
+        assert!(
+            signal.needs_flush(),
+            "the second mark must survive the first flush"
+        );
+        let second = signal.begin_flush();
+        signal.end_flush(second);
+        assert!(!signal.needs_flush());
     }
 }

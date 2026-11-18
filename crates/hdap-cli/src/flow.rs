@@ -12,9 +12,10 @@ use ed25519_dalek::Signer;
 use serde_json::{json, Value};
 
 use hdap_core::auth::{
-    derive_shared_key, prove_knowledge, prove_possession, prove_session_secret, Challenge,
+    derive_shared_key, omphalos_rotation_text, prove_knowledge, prove_possession,
+    prove_session_secret_bound, Challenge,
 };
-use hdap_core::crypto::{otp_chain, sha256, CryptoError};
+use hdap_core::crypto::{CryptoError, MAX_OTP_CHAIN_LEN};
 use hdap_core::doc::{parse as parse_doc, ParseError, Signature};
 use hdap_core::identity::Identity;
 use hdap_core::pow::solve_pow_rand;
@@ -85,9 +86,14 @@ fn token_headers(token: &str) -> BTreeMap<String, String> {
     h
 }
 
+/// Full `/health` payload, including the Ángelma and UTC clock facts.
+pub fn fetch_health(client: &HttpClient) -> Result<Value, FlowError> {
+    ok_json(client.get("/health", &BTreeMap::new())?)
+}
+
 /// Learn the node's `server_id` and ENC public key from `/health`.
 pub fn fetch_node_facts(client: &HttpClient) -> Result<(String, String), FlowError> {
-    let v = ok_json(client.get("/health", &BTreeMap::new())?)?;
+    let v = fetch_health(client)?;
     let server_id = v["server_id"]
         .as_str()
         .map(String::from)
@@ -121,6 +127,55 @@ pub fn register(client: &HttpClient, identity: &Identity) -> Result<RegisterResu
         .ok_or_else(|| FlowError::Proto("missing user_id".into()))?
         .to_string();
     Ok(RegisterResult { user_id })
+}
+
+/// Result of a successful OMPHALOS anchor rotation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OmphalosRotation {
+    pub seed_iter: u64,
+    pub otp_anchor: String,
+}
+
+/// Rotate the OTP anchor with the identity key, not just a stolen session.
+///
+/// The new chain is derived with the same variant (v2 HKDF or v1 legacy) the
+/// account was registered with, so rotation never locks the owner out.
+pub fn rotate_omphalos(
+    client: &HttpClient,
+    token: &str,
+    identity: &Identity,
+) -> Result<OmphalosRotation, FlowError> {
+    let new_k = identity
+        .otp_k
+        .checked_add(1)
+        .filter(|k| *k <= MAX_OTP_CHAIN_LEN)
+        .ok_or_else(|| FlowError::Proto("otp chain length exhausted".into()))?;
+    let new_anchor = identity.otp_anchor_for(new_k);
+    let text = omphalos_rotation_text(
+        &identity.global_id(),
+        &identity.otp_anchor,
+        &new_anchor,
+        new_k as u64,
+    );
+    let sig = identity.sign_key.sign(text.as_bytes());
+    let body = json!({
+        "otp_anchor": new_anchor,
+        "seed_iter": new_k,
+        "identity_signature": base64::engine::general_purpose::STANDARD.encode(sig.to_bytes()),
+    })
+    .to_string();
+    let resp = client.request(
+        "POST",
+        "/omphalos",
+        &BTreeMap::new(),
+        &token_headers(token),
+        body.as_bytes(),
+    )?;
+    let v = ok_json(resp)?;
+    Ok(OmphalosRotation {
+        seed_iter: v["seed_iter"].as_u64().unwrap_or(new_k as u64),
+        otp_anchor: new_anchor,
+    })
 }
 
 /// Result of a successful 3-factor login.
@@ -165,16 +220,20 @@ pub fn authenticate(
     use base64::Engine;
     let signature_b64 = base64::engine::general_purpose::STANDARD.encode(sig.to_bytes());
 
-    // Factor 2: OTP knowledge.
-    let seed = sha256(&identity.sign_key.to_bytes());
-    let (_, chain) = otp_chain(&seed, identity.otp_k);
+    // Factor 2: OTP knowledge. `Identity::otp_chain` picks the HKDF (v2) or
+    // raw-seed (v1) derivation that matches the registered anchor, so an
+    // account created before Teleios can still authenticate after an upgrade.
+    let chain = identity.otp_chain();
     let witness = prove_knowledge(&chain, otp_step)
         .ok_or_else(|| FlowError::Proto("otp step out of range".into()))?;
     let otp_proof_b64 = base64::engine::general_purpose::STANDARD.encode(&witness.proof);
 
-    // Factor 3: k = X25519(user_enc_priv, node_enc_pub), then HMAC-prove it.
+    // Factor 3: k = HKDF(X25519(user_enc_priv, node_enc_pub)), proved over the
+    // exact challenge text the server issued (nonce + UTC ts). The client never
+    // substitutes a local timestamp, so timezone differences cannot cause a
+    // "factor 3 failed" error.
     let k = derive_shared_key(&identity.enc_secret, &node_enc_pub_bytes);
-    let code_proof = prove_session_secret(&k, user_id, &server_id, ts);
+    let code_proof = prove_session_secret_bound(&k[..], user_id, &server_id, &ch.canonical_text());
 
     // Entry toll (`pylaia`, §7.4). The node ships the challenge with the
     // `proklesis`, bound to its nonce, so this is fresh work per login and
@@ -1444,6 +1503,57 @@ mod tests {
         let auth = authenticate(&client, &id, &reg.user_id, 1)
             .expect("a node requiring entry PoW must issue a solvable challenge");
         assert!(!auth.token.is_empty());
+    }
+
+    /// Rotating OMPHALOS requires the identity key: a stolen session token
+    /// alone cannot lock the real owner out. After rotation the client must
+    /// persist the new anchor/k so the next login uses the new chain.
+    #[test]
+    fn auth_then_omphalos_rotation_then_auth() {
+        let client = spawn_server();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let id = Identity::generate("rotating", now);
+        let reg = register(&client, &id).unwrap();
+        let first = authenticate(&client, &id, &reg.user_id, 1).unwrap();
+
+        // A session without the identity signature is refused.
+        let unsigned = serde_json::json!({
+            "otp_anchor": "ab".repeat(32),
+            "seed_iter": id.otp_k + 1,
+        })
+        .to_string();
+        let resp = client
+            .request(
+                "POST",
+                "/omphalos",
+                &BTreeMap::new(),
+                &token_headers(&first.token),
+                unsigned.as_bytes(),
+            )
+            .unwrap();
+        assert_eq!(resp.status, 401, "{}", String::from_utf8_lossy(&resp.body));
+
+        let rotated = rotate_omphalos(&client, &first.token, &id).unwrap();
+        assert_eq!(rotated.seed_iter, id.otp_k as u64 + 1);
+        assert_ne!(rotated.otp_anchor, id.otp_anchor);
+
+        let updated = Identity {
+            otp_k: rotated.seed_iter as usize,
+            otp_anchor: rotated.otp_anchor.clone(),
+            ..id.clone()
+        };
+
+        // A client still holding the old anchor can no longer authenticate.
+        assert!(authenticate(&client, &id, &reg.user_id, 2).is_err());
+
+        // The updated identity logs in normally with the next step. The token
+        // itself is deterministic for a given (shared key, server, expiry), so
+        // two logins in the same second legitimately produce the same string.
+        let second = authenticate(&client, &updated, &reg.user_id, 2).unwrap();
+        assert!(!second.token.is_empty());
     }
 
     #[test]

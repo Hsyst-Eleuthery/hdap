@@ -6,7 +6,9 @@ use crate::crypto::{
 };
 use crate::doc::{Doc, DocType};
 use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
+use hkdf::Hkdf;
 use rand_core::{OsRng, RngCore};
+use sha2::{Digest, Sha256, Sha512};
 use x25519_dalek::StaticSecret;
 
 /// This crate emits `nickname_<sufixo>`; the prefix is fixed for usability
@@ -146,6 +148,19 @@ pub fn canonical_nickname(raw: &str) -> Result<String, NicknameError> {
     Ok(norm)
 }
 
+/// How the OTP chain root was derived, so the client can always rebuild the
+/// correct chain from the stored anchor, regardless of derivation era.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OtpDerivation {
+    /// v1/legacy: raw seed bytes as chain root.
+    V1,
+    /// v2/Teleios: SHA-256(signing key) as chain root.
+    #[default]
+    V2,
+    /// Recovery phrase: HKDF(seed, "hdap:recovery:otp") as chain root.
+    Recovery,
+}
+
 #[derive(Clone)]
 pub struct Identity {
     pub nickname: String,
@@ -156,6 +171,12 @@ pub struct Identity {
     pub otp_k: usize,
     /// OTP anchor hex (published).
     pub otp_anchor: String,
+    /// How the OTP chain root was derived.
+    pub otp_derivation: OtpDerivation,
+    /// OTP-chain root for recovery-phrase accounts. Present when the identity
+    /// was created from a recovery phrase; used to rebuild the OTP chain at
+    /// login without depending on the signing key.
+    pub recovery_root: Option<[u8; 32]>,
     pub created_at: u64,
 }
 
@@ -165,6 +186,7 @@ impl std::fmt::Debug for Identity {
             .field("global_id", &self.global_id())
             .field("otp_k", &self.otp_k)
             .field("sign_pubkey", &hex::encode(self.sign_pubkey()))
+            .field("otp_derivation", &self.otp_derivation)
             .field("created_at", &self.created_at)
             .finish()
     }
@@ -185,7 +207,7 @@ impl Identity {
         let sign_key = ed25519_keygen(&mut rng);
         let enc_secret = x25519_keygen(&mut rng);
         let otp_k = 1024;
-        let (anchor, _) = otp_chain(&sha256ed(&sign_key), otp_k);
+        let (anchor, _) = crate::auth::make_otp_chain(&sha256ed(&sign_key), otp_k);
 
         Identity {
             nickname: nickname.to_string(),
@@ -194,6 +216,8 @@ impl Identity {
             enc_secret,
             otp_k,
             otp_anchor: anchor,
+            otp_derivation: OtpDerivation::V2,
+            recovery_root: None,
             created_at,
         }
     }
@@ -207,11 +231,66 @@ impl Identity {
         ))
     }
 
+    /// Rebuild an identity from a 64-byte BIP-39 recovery seed plus nickname.
+    ///
+    /// All key material is deterministically derived from `seed` with
+    /// independent HKDF labels, so no key material is reused across roles:
+    /// - suffix: first 8 hex of SHA-256(signing public key) — no seed bytes
+    ///   are exposed
+    /// - sign key: HKDF(seed, "hdap:recovery:sign") → Ed25519
+    /// - enc secret: HKDF(seed, "hdap:recovery:enc") → X25519
+    /// - OTP anchor: HKDF(seed, "hdap:recovery:otp") → chain, k = 1024
+    pub fn from_seed(nickname: &str, created_at: u64, seed: &[u8; 64]) -> Identity {
+        let hkdf_sign = Hkdf::<Sha512>::new(None, seed);
+        let mut sign_key_material = [0u8; 32];
+        hkdf_sign
+            .expand(b"hdap:recovery:sign", &mut sign_key_material)
+            .expect("HKDF expand always succeeds");
+        let sign_key = ed25519_dalek::SigningKey::from_bytes(&sign_key_material);
+        let suffix_hex = {
+            let pk = sign_key.verifying_key().to_bytes();
+            let digest = Sha256::digest(pk);
+            hex::encode(&digest[..8])
+        };
+
+        let hkdf_enc = Hkdf::<Sha512>::new(None, seed);
+        let mut enc_key_material = [0u8; 32];
+        hkdf_enc
+            .expand(b"hdap:recovery:enc", &mut enc_key_material)
+            .expect("HKDF expand always succeeds");
+        let enc_secret = x25519_dalek::StaticSecret::from(enc_key_material);
+
+        let hkdf_otp = Hkdf::<Sha512>::new(None, seed);
+        let mut otp_root = [0u8; 32];
+        hkdf_otp
+            .expand(b"hdap:recovery:otp", &mut otp_root)
+            .expect("HKDF expand always succeeds");
+        // The vault root is not stored on disk; the OTP root doubles as the
+        // recovery root so factor 2 can be rebuilt at login from the vault.
+        let otp_k = 1024;
+        let (anchor, _) = crate::auth::make_otp_chain(&otp_root, otp_k);
+
+        Identity {
+            nickname: nickname.to_string(),
+            suffix_hex,
+            sign_key,
+            enc_secret,
+            otp_k,
+            otp_anchor: anchor,
+            otp_derivation: OtpDerivation::Recovery,
+            recovery_root: Some(otp_root),
+            created_at,
+        }
+    }
+
     /// Rebuild the identity from a `prosopeion.hdap` doc + local secrets.
+    /// `recovery_root` is the optional OTP-chain root recovered from the vault;
+    /// when present the account was created from a recovery phrase.
     pub fn from_doc(
         doc: &Doc,
         sign_key: SigningKey,
         enc_secret: StaticSecret,
+        recovery_root: Option<[u8; 32]>,
     ) -> CryptoResult<Identity> {
         if doc.doc_type != DocType::Prosopeion {
             return Err(CryptoError::VerificationFailed);
@@ -249,6 +328,11 @@ impl Identity {
         }
 
         let created_at = doc.created_at;
+        let otp_derivation = if recovery_root.is_some() {
+            OtpDerivation::Recovery
+        } else {
+            OtpDerivation::V2
+        };
         Ok(Identity {
             nickname,
             suffix_hex,
@@ -256,6 +340,8 @@ impl Identity {
             enc_secret,
             otp_k,
             otp_anchor,
+            otp_derivation,
+            recovery_root,
             created_at,
         })
     }
@@ -263,6 +349,11 @@ impl Identity {
     /// `nickname_<sufixo>`.
     pub fn global_id(&self) -> String {
         format!("{}_{}", self.nickname, self.suffix_hex)
+    }
+
+    /// Vault seed: SHA-256 of the signing public key. Used to seal the vault.
+    pub fn seed(&self) -> [u8; 32] {
+        sha256ed(&self.sign_key)
     }
 
     /// Build the public `prosopeion.hdap` document (canonical, unsigned).
@@ -329,6 +420,64 @@ impl Identity {
     pub fn enc_pubkey(&self) -> [u8; 32] {
         x25519_public(&self.enc_secret)
     }
+
+    /// Rebuild the OTP chain that matches this identity's published anchor.
+    ///
+    /// Tries each known derivation (V1 raw seed, V2 SHA-256(sign key)) and
+    /// uses the one that reproduces the stored `otp_anchor`. This lets
+    /// identities created under any derivation era keep logging in after an
+    /// upgrade, and keeps the failure explicit when no derivation matches.
+    pub fn otp_chain(&self) -> Vec<[u8; 32]> {
+        self.otp_chain_for(self.otp_k)
+    }
+
+    /// Try each derivation root and return the chain whose anchor matches
+    /// `self.otp_anchor`.
+    /// Build the chain for a (possibly larger) `k`, using the derivation that
+    /// reproduces the stored `otp_anchor`. Every derivation is tried; the
+    /// recorded `otp_derivation` is only a hint.
+    pub fn otp_chain_for(&self, k: usize) -> Vec<[u8; 32]> {
+        let sign_key_root = sha256ed(&self.sign_key);
+        let anchor = &self.otp_anchor;
+
+        // Recovery-phrase accounts: try the OTP root first, since it is the
+        // derivation that produced the anchor. Factor 2 stays independent of
+        // factor 1 because the OTP root comes from HKDF(seed, "hdap:recovery:otp").
+        if let Some(root) = self.recovery_root {
+            if crate::auth::make_otp_chain(&root, self.otp_k)
+                .0
+                .eq_ignore_ascii_case(anchor)
+            {
+                return crate::auth::make_otp_chain(&root, k).1;
+            }
+        }
+
+        // Try V2 first (the current default), then V1 (legacy raw seed).
+        if crate::auth::make_otp_chain(&sign_key_root, self.otp_k)
+            .0
+            .eq_ignore_ascii_case(anchor)
+        {
+            return crate::auth::make_otp_chain(&sign_key_root, k).1;
+        }
+        if otp_chain(&sign_key_root, self.otp_k)
+            .0
+            .eq_ignore_ascii_case(anchor)
+        {
+            return otp_chain(&sign_key_root, k).1;
+        }
+
+        // No derivation matched: fall back to V2 so the failure stays
+        // explicit (login will reject with "factor 2 failed").
+        crate::auth::make_otp_chain(&sign_key_root, k).1
+    }
+
+    /// Published anchor for a rotated chain length.
+    pub fn otp_anchor_for(&self, k: usize) -> String {
+        self.otp_chain_for(k)
+            .last()
+            .map(hex::encode)
+            .unwrap_or_default()
+    }
 }
 
 fn sha256ed(key: &SigningKey) -> [u8; 32] {
@@ -346,6 +495,10 @@ pub fn parse_global_id(id: &str) -> Option<(&str, &str)> {
 
 #[cfg(test)]
 mod tests {
+    use crate::vault::{Vault, VaultSecrets};
+    use crate::{Identity, RecoveryPhrase};
+    use ed25519_dalek::SigningKey;
+    use x25519_dalek::StaticSecret;
 
     /// The one rule that matters for addressing: a bare nickname must never
     /// be usable as if it were a global id, and spelling variants of the same
@@ -409,10 +562,87 @@ mod tests {
             &back,
             id.sign_key.clone(),
             StaticSecret::from(id.enc_secret.to_bytes()),
+            None,
         )
         .unwrap();
         assert_eq!(rebuilt.global_id(), gid);
         assert_eq!(rebuilt.otp_anchor, id.otp_anchor);
+    }
+
+    /// A v1 account (raw-seed anchor) must still be able to log in after the
+    /// server upgrades to Teleios: the client picks the derivation matching
+    /// the published anchor instead of blindly applying HKDF.
+    #[test]
+    fn a_legacy_v1_otp_anchor_still_rebuilds_a_verifiable_chain() {
+        let mut id = Identity::generate("jose", 1_700_000_000);
+        let (legacy_anchor, legacy_chain) = otp_chain(&sha256ed(&id.sign_key), id.otp_k);
+        id.otp_anchor = legacy_anchor;
+
+        let rebuilt = id.otp_chain();
+        assert_eq!(rebuilt, legacy_chain);
+        let witness = crate::auth::prove_knowledge(&rebuilt, 7).expect("witness");
+        assert!(crate::auth::verify_knowledge_bounded(
+            &id.otp_anchor,
+            &witness,
+            id.otp_k
+        ));
+    }
+
+    /// End-to-end recovery: create an identity from a recovery phrase, seal the
+    /// vault, reload it, and prove the OTP chain is still verifiable. This
+    /// exercises the full recovery path a user follows after losing krypte.hdap.
+    #[test]
+    fn recovery_phrase_roundtrip_rebuilds_identity_and_otp_chain() {
+        let (phrase, seed) = RecoveryPhrase::generate();
+        let words = phrase.words_only();
+
+        // 1. Create identity from the recovery phrase.
+        let id = Identity::from_seed("recover_test", 1_700_000_000, &seed);
+        assert_eq!(id.otp_derivation, OtpDerivation::Recovery);
+        assert!(id.recovery_root.is_some());
+
+        // 2. Seal the vault as identity_store::save would.
+        let secrets = VaultSecrets {
+            seed: id.seed(),
+            sign_secret: id.sign_key.to_bytes(),
+            enc_secret: id.enc_secret.to_bytes(),
+            recovery_root: id.recovery_root,
+        };
+        let vault = Vault::seal(&secrets, b"passphrase");
+        let raw = vault.to_bytes();
+
+        // 3. Reload the vault as identity_store::load would.
+        let re_vault = Vault::from_bytes(&raw).unwrap();
+        let re_secrets = re_vault.open(b"passphrase").unwrap();
+        let doc = id.prosopeion_doc();
+        let re_id = Identity::from_doc(
+            &doc,
+            SigningKey::from_bytes(&re_secrets.sign_secret),
+            StaticSecret::from(re_secrets.enc_secret),
+            re_secrets.recovery_root,
+        )
+        .unwrap();
+
+        // 4. Identity must be identical.
+        assert_eq!(re_id.global_id(), id.global_id());
+        assert_eq!(re_id.sign_pubkey(), id.sign_pubkey());
+        assert_eq!(re_id.enc_pubkey(), id.enc_pubkey());
+        assert_eq!(re_id.otp_anchor, id.otp_anchor);
+        assert_eq!(re_id.otp_derivation, OtpDerivation::Recovery);
+
+        // 5. OTP chain must be rebuildable from the vault root and produce a
+        //    verifiable witness.
+        let chain = re_id.otp_chain();
+        let witness = crate::auth::prove_knowledge(&chain, 7).expect("witness");
+        assert!(crate::auth::verify_knowledge_bounded(
+            &re_id.otp_anchor,
+            &witness,
+            re_id.otp_k
+        ));
+
+        // 6. The recovery phrase must round-trip through parsing.
+        let re_phrase = RecoveryPhrase::from_words(&words).unwrap();
+        assert_eq!(re_phrase.phrase(), phrase.phrase());
     }
 
     #[test]

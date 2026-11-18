@@ -68,6 +68,24 @@ pub struct Config {
     pub rate_limit_burst: u32,
     /// Federation timestamp window tolerance (± seconds).
     pub fed_window_secs: i64,
+    /// Ángelma: message of the day served on `/health` and `/motd`.
+    /// Supports `HDAP{[tag]}` placeholders (see `node::motd`).
+    pub motd: String,
+    /// Maximum simultaneous connections. Excess sockets are closed so the OS
+    /// backlog applies backpressure instead of spawning unbounded threads.
+    pub max_connections: usize,
+    /// Maximum outstanding factor-1 challenges per user.
+    pub max_proklesis_per_user: usize,
+    /// Interval, in seconds, between background purges of expired challenges
+    /// and sessions. `0` disables the worker.
+    pub cleanup_interval_secs: u64,
+    /// Tolerance, in seconds, when the server validates client-supplied Unix
+    /// timestamps. Bounds clock skew without depending on anyone's timezone.
+    pub time_tolerance_secs: i64,
+    /// Path to a file holding the hex master key, kept **outside** the archive
+    /// database. When unset the node falls back to the legacy in-DB key and
+    /// prints a warning at startup.
+    pub master_key_file: Option<std::path::PathBuf>,
     /// Optional federation pins: `node_id -> FederationPeer`.
     ///
     /// An empty map does **not** close the node. Federation is always open:
@@ -95,7 +113,13 @@ impl Default for Config {
             moira_bytes: 0,
             rate_limit_per_sec: 10,
             rate_limit_burst: 20,
-            fed_window_secs: 30,
+            fed_window_secs: 600,
+            motd: String::new(),
+            max_connections: 256,
+            max_proklesis_per_user: 4,
+            cleanup_interval_secs: 60,
+            time_tolerance_secs: 300,
+            master_key_file: None,
             federation_peers: std::collections::BTreeMap::new(),
             band_bytes_per_hour: 64 * 1024 * 1024,
             pow_strict_hashrate: false,

@@ -8,6 +8,8 @@ pub mod config;
 pub mod db;
 pub mod fed_client;
 pub mod http;
+pub mod log;
+pub mod motd;
 pub mod node;
 pub mod pyle;
 pub mod store;

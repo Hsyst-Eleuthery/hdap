@@ -9,7 +9,7 @@
 use std::net::TcpListener;
 use std::process::ExitCode;
 
-use hdap_server::{Config, Node};
+use hdap_server::{config::FederationPeer, Config, Node};
 
 struct Args {
     listen: String,
@@ -19,6 +19,9 @@ struct Args {
     server_id: Option<String>,
     no_tls: bool,
     cfg: Config,
+    /// Pre-pinned federation peers passed via `--federation-peer` (repeatable).
+    /// Format: `node_id:pubkey:endpoint[:tls_pin]`.
+    federation_peers: Vec<(String, FederationPeer)>,
     /// Where the SQLite archive lives. Everything the node holds — accounts,
     /// sealed content, the band ledger and the replay guards — is in here.
     data_dir: String,
@@ -57,6 +60,15 @@ fn print_usage() {
            --no-entry-pow        disable the login entry PoW (pylaia)\n  \
            --pylaia-target N     entry PoW difficulty in bits (default 12)\n  \
            --rate-limit N       max requests/sec per peer (0 disables)\n  \
+           --motd TEXT          Ángelma (message of the day); HDAP{{[tag]}} placeholders\n  \
+           --motd-file FILE     read the Ángelma from a UTF-8 file (last one wins)\n  \
+           --master-key-file FILE  store the blob key outside the DB (hex, 0600)\n  \
+           --max-connections N  simultaneous connections (default 256)\n  \
+           --max-challenges N  outstanding login challenges per user (default 4)\n  \
+           --cleanup-interval N seconds between expiry purges; 0 disables (default 60)\n  \
+           --time-tolerance N   federation clock-skew tolerance in seconds (default 300)\n  \
+           --fed-window-secs N  replay-window memory in seconds (default 600, >= tolerance)\n  \
+           --federation-peer NODE:PUBKEY:ENDPOINT[:TLS_PIN]  pre-pin a federation peer\n  \
            --help               show usage\n  \
            --version            show version"
     );
@@ -76,6 +88,7 @@ fn parse_args() -> Args {
         ephemeral: false,
         advertise: None,
         cfg: Config::default(),
+        federation_peers: Vec::new(),
     };
     while let Some(flag) = args.next() {
         match flag.as_str() {
@@ -111,6 +124,52 @@ fn parse_args() -> Args {
             "--no-entry-pow" => out.cfg.require_entry_pow = false,
             "--pylaia-target" => out.cfg.pylaia_target = parse_value(&mut args, "--pylaia-target"),
             "--rate-limit" => out.cfg.rate_limit_per_sec = parse_value(&mut args, "--rate-limit"),
+            "--motd" => out.cfg.motd = take_value(&mut args, "--motd"),
+            "--motd-file" => {
+                let path = take_value(&mut args, "--motd-file");
+                out.cfg.motd = std::fs::read_to_string(&path)
+                    .unwrap_or_else(|e| panic!("cannot read --motd-file {path}: {e}"));
+            }
+            "--master-key-file" => {
+                out.cfg.master_key_file = Some(std::path::PathBuf::from(take_value(
+                    &mut args,
+                    "--master-key-file",
+                )));
+            }
+            "--max-connections" => {
+                out.cfg.max_connections = parse_value(&mut args, "--max-connections")
+            }
+            "--max-challenges" => {
+                out.cfg.max_proklesis_per_user = parse_value(&mut args, "--max-challenges")
+            }
+            "--cleanup-interval" => {
+                out.cfg.cleanup_interval_secs = parse_value(&mut args, "--cleanup-interval")
+            }
+            "--time-tolerance" => {
+                out.cfg.time_tolerance_secs = parse_value(&mut args, "--time-tolerance")
+            }
+            "--fed-window-secs" => {
+                out.cfg.fed_window_secs = parse_value(&mut args, "--fed-window-secs")
+            }
+            "--federation-peer" => {
+                let spec = take_value(&mut args, "--federation-peer");
+                let mut parts = spec.splitn(4, ':');
+                let node_id = parts.next().unwrap_or("").to_string();
+                let pubkey = parts.next().unwrap_or("").to_string();
+                let endpoint = parts.next().unwrap_or("").to_string();
+                let tls_pin = parts.next().map(|s| s.to_string());
+                if node_id.is_empty() || pubkey.is_empty() || endpoint.is_empty() {
+                    panic!("invalid --federation-peer '{spec}': expected NODE:PUBKEY:ENDPOINT[:TLS_PIN]");
+                }
+                out.federation_peers.push((
+                    node_id,
+                    FederationPeer {
+                        pubkey,
+                        endpoint,
+                        tls_pin,
+                    },
+                ));
+            }
             "--help" | "-h" => {
                 print_usage();
                 std::process::exit(0);
@@ -121,6 +180,13 @@ fn parse_args() -> Args {
             }
             other => panic!("unknown flag `{other}`"),
         }
+    }
+
+    // Apply pre-pinned federation peers to the config.
+    for (node_id, peer) in &out.federation_peers {
+        out.cfg
+            .federation_peers
+            .insert(node_id.clone(), peer.clone());
     }
     out
 }
@@ -169,18 +235,140 @@ fn default_server_id(listen: &str, advertise: Option<&str>) -> String {
     hdap_server::pyle::id_from_endpoint(endpoint)
 }
 
+/// Read the operator-owned 32-byte hex master key from `path`, creating it
+/// with owner-only permissions when absent. On the first v2 boot of a v1 node
+/// the key is migrated out of the DB so no sealed blob is orphaned.
+fn load_or_create_master_key(
+    path: &std::path::Path,
+    db_path: &std::path::Path,
+    ephemeral: bool,
+) -> Result<[u8; 32], String> {
+    if path.exists() {
+        let raw = std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read master key file {}: {e}", path.display()))?;
+        let hex = raw.trim();
+        let bytes = hex::decode(hex)
+            .map_err(|e| format!("master key file {} is not valid hex: {e}", path.display()))?;
+        return <[u8; 32]>::try_from(bytes).map_err(|v| {
+            format!(
+                "master key file {} must contain exactly 32 bytes (64 hex chars), got {}",
+                path.display(),
+                v.len()
+            )
+        });
+    }
+
+    // No key file yet: migrate the v1 key out of an existing DB, or generate a
+    // fresh one for a brand-new node.
+    let key = if ephemeral {
+        let mut key = [0u8; 32];
+        rand_core::RngCore::fill_bytes(&mut rand_core::OsRng, &mut key);
+        key
+    } else {
+        match hdap_server::db::Db::peek_master_key(db_path)
+            .map_err(|e| format!("cannot inspect database for master key: {e}"))?
+        {
+            Some(key) => key,
+            None => {
+                let mut key = [0u8; 32];
+                rand_core::RngCore::fill_bytes(&mut rand_core::OsRng, &mut key);
+                key
+            }
+        }
+    };
+
+    if let Some(dir) = path.parent() {
+        if !dir.as_os_str().is_empty() {
+            std::fs::create_dir_all(dir)
+                .map_err(|e| format!("cannot create key directory {}: {e}", dir.display()))?;
+        }
+    }
+    write_key_file(path, &key)?;
+    hdap_server::hlog!(
+        warn,
+        "key",
+        "master key created at {} — back it up; without it the archive is unreadable",
+        path.display()
+    );
+    Ok(key)
+}
+
+fn write_key_file(path: &std::path::Path, key: &[u8; 32]) -> Result<(), String> {
+    use std::io::Write;
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut f = opts
+        .open(path)
+        .map_err(|e| format!("cannot create master key file {}: {e}", path.display()))?;
+    f.write_all(hex::encode(key).as_bytes())
+        .map_err(|e| format!("cannot write master key file {}: {e}", path.display()))?;
+    f.write_all(b"\n")
+        .map_err(|e| format!("cannot write master key file {}: {e}", path.display()))?;
+    Ok(())
+}
+
 fn main() -> ExitCode {
+    hdap_server::log::init();
     let mut args = parse_args();
+
+    // Sanity-check federation timing: the replay-window memory must cover at
+    // least twice the clock-skew tolerance. A timestamp accepted by skew may
+    // arrive up to `time_tolerance_secs` early, and its nonce must still be
+    // remembered when the "real" arrival time comes.
+    if args.cfg.fed_window_secs < 2 * args.cfg.time_tolerance_secs {
+        hdap_server::hlog!(
+            error,
+            "startup",
+            "fed_window_secs ({}) is smaller than 2 x time_tolerance_secs ({}); \
+             a skew-accepted timestamp could replay after its nonce is forgotten. \
+             Set --fed-window-secs >= 2 * --time-tolerance-secs.",
+            args.cfg.fed_window_secs,
+            2 * args.cfg.time_tolerance_secs
+        );
+        return ExitCode::FAILURE;
+    }
+
     let server_id = args
         .server_id
         .clone()
         .unwrap_or_else(|| default_server_id(&args.listen, args.advertise.as_deref()));
     args.cfg.server_id = server_id.clone();
 
+    let db_path = std::path::Path::new(&args.data_dir).join("hdap.db");
+
+    // Resolve the master key BEFORE opening the DB: when a key file is
+    // configured the DB row is redacted on every flush, so the file is the
+    // single authority for decrypting sealed blobs.
+    let external_key = match args.cfg.master_key_file.clone() {
+        Some(path) => match load_or_create_master_key(&path, &db_path, args.ephemeral) {
+            Ok(key) => Some(key),
+            Err(e) => {
+                hdap_server::hlog!(error, "startup", "{e}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => {
+            hdap_server::hlog!(
+                warn, "startup",
+                "chave mestra dentro do banco (legado). Use --master-key-file FILE para mantê-la fora do banco."
+            );
+            None
+        }
+    };
+    // Snapshot startup settings before `args.cfg` is moved into `Node`.
+    let max_body_bytes = args.cfg.max_body_bytes;
+    let max_connections = args.cfg.max_connections;
+    let cleanup_interval = args.cfg.cleanup_interval_secs;
+
     let listener = match TcpListener::bind(&args.listen) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("hdap-server: cannot bind {}: {e}", args.listen);
+            hdap_server::hlog!(error, "startup", "cannot bind {}: {e}", args.listen);
             return ExitCode::FAILURE;
         }
     };
@@ -195,9 +383,9 @@ fn main() -> ExitCode {
     // the federation API in cleartext — the flag's own help text already says
     // "loopback/dev only".
     if args.no_tls && !is_loopback_bind(&args.listen) {
-        eprintln!(
-            "hdap-server: --no-tls exige --listen em loopback (127.0.0.1, ::1 ou localhost); \
-             recusando expor HTTP em claro em {}",
+        hdap_server::hlog!(
+            error, "startup",
+            "--no-tls exige --listen em loopback (127.0.0.1, ::1 ou localhost); recusando HTTP em claro em {}",
             args.listen
         );
         return ExitCode::FAILURE;
@@ -219,17 +407,17 @@ fn main() -> ExitCode {
         let tls = match tls {
             Ok(id) => {
                 let pin = id.pin();
-                eprintln!("hdap-server: tls_pin={pin} (client TOFU anchor)");
+                hdap_server::hlog!(warn, "tls", "tls_pin={pin} (client TOFU anchor)");
                 match id.server_config() {
                     Ok(cfg) => Some((pin, cfg)),
                     Err(e) => {
-                        eprintln!("hdap-server: TLS config failed: {e}");
+                        hdap_server::hlog!(error, "tls", "TLS config failed: {e}");
                         return ExitCode::FAILURE;
                     }
                 }
             }
             Err(e) => {
-                eprintln!("hdap-server: TLS keygen failed: {e}");
+                hdap_server::hlog!(error, "tls", "TLS keygen failed: {e}");
                 return ExitCode::FAILURE;
             }
         };
@@ -257,45 +445,57 @@ fn main() -> ExitCode {
     // Open the archive before serving a single request, so a broken or
     // unreadable database is a startup failure with a clear message rather
     // than a node that answers `200` while silently keeping nothing.
-    let db_path = std::path::Path::new(&args.data_dir).join("hdap.db");
     if args.ephemeral {
-        eprintln!("hdap-server: --ephemeral: NADA será salvo, tudo morre com o processo");
-        let db = match hdap_server::db::Db::open_memory() {
+        hdap_server::hlog!(
+            warn,
+            "startup",
+            "--ephemeral: NADA será salvo, tudo morre com o processo"
+        );
+        let db = match hdap_server::db::Db::open_memory_with_master_key(external_key) {
             Ok(db) => db,
             Err(e) => {
-                eprintln!("hdap-server: banco em memória falhou: {e}");
+                hdap_server::hlog!(error, "startup", "banco em memória falhou: {e}");
                 return ExitCode::FAILURE;
             }
         };
         if let Err(e) = node.with_db(std::sync::Arc::new(db)) {
-            eprintln!("hdap-server: estado inicial falhou: {e}");
+            hdap_server::hlog!(error, "startup", "estado inicial falhou: {e}");
             return ExitCode::FAILURE;
         }
     } else {
-        let db = match hdap_server::db::Db::open(&db_path) {
+        let db = match hdap_server::db::Db::open_with_master_key(&db_path, external_key) {
             Ok(db) => db,
             Err(e) => {
-                eprintln!("hdap-server: não consegui abrir {}: {e}", db_path.display());
+                hdap_server::hlog!(
+                    error,
+                    "startup",
+                    "não consegui abrir {}: {e}",
+                    db_path.display()
+                );
                 return ExitCode::FAILURE;
             }
         };
         let db = std::sync::Arc::new(db);
         if let Err(e) = node.with_db(db.clone()) {
-            eprintln!(
-                "hdap-server: estado gravado em {} é ilegível: {e}",
+            hdap_server::hlog!(
+                error,
+                "startup",
+                "estado gravado em {} é ilegível: {e}",
                 db_path.display()
             );
             return ExitCode::FAILURE;
         }
         if let Err(e) = node.persist() {
-            eprintln!("hdap-server: falha ao gravar o estado inicial: {e}");
+            hdap_server::hlog!(error, "startup", "falha ao gravar o estado inicial: {e}");
             return ExitCode::FAILURE;
         }
         // Read the counts *after* the load, so "retomado" reflects the file.
-        let n_users = node.state.lock().unwrap().users.len();
+        let n_users = node.lock_state().users.len();
         let resuming = n_users > 0;
-        println!(
-            "hdap-server: banco {} ({})",
+        hdap_server::hlog!(
+            info,
+            "startup",
+            "banco {} ({})",
             db_path.display(),
             if resuming {
                 format!("retomado: {n_users} conta(s)")
@@ -307,8 +507,10 @@ fn main() -> ExitCode {
 
     // `node` is moved into the handler below, so read the id out first.
     let server_id = node.cfg.server_id.clone();
-    println!(
-        "hdap-server {} on {} node_id={}",
+    hdap_server::hlog!(
+        info,
+        "startup",
+        "{} on {} node_id={}",
         if args.no_tls { "(plaintext)" } else { "(TLS)" },
         args.listen,
         server_id
@@ -317,13 +519,26 @@ fn main() -> ExitCode {
     let node = std::sync::Arc::new(node);
     let discovery = std::sync::Arc::clone(&node);
     std::thread::spawn(move || hdap_server::node::discovery::run_forever(discovery));
+    if cleanup_interval > 0 {
+        let cleanup_node = std::sync::Arc::clone(&node);
+        std::thread::spawn(move || hdap_server::node::cleanup::run_forever(cleanup_node));
+    } else {
+        hdap_server::hlog!(
+            warn,
+            "cleanup",
+            "limpeza periódica desativada (--cleanup-interval 0)"
+        );
+    }
+    let limiter = hdap_server::http::ConnectionLimiter::new(max_connections);
     let handle = move |req: hdap_server::http::Request| node.handle(&req);
     let result = match tls_cfg {
-        None => hdap_server::http::serve(listener, 64 * 1024 * 1024, handle),
-        Some((_, cfg)) => hdap_server::http::serve_tls(listener, 64 * 1024 * 1024, cfg, handle),
+        None => hdap_server::http::serve_with_limit(listener, max_body_bytes, limiter, handle),
+        Some((_, cfg)) => {
+            hdap_server::http::serve_tls_with_limit(listener, max_body_bytes, cfg, limiter, handle)
+        }
     };
     if let Err(e) = result {
-        eprintln!("hdap-server: serve error: {e}");
+        hdap_server::hlog!(error, "serve", "serve error: {e}");
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS

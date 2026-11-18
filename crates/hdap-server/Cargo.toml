@@ -15,7 +15,7 @@ serde.workspace = true
 # Embedded database. `bundled` compiles SQLite from source so the node has
 # no system-library dependency — the archive must survive a bare `apt`-less
 # host, and the whole point of the DB is surviving.
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 base64.workspace = true
 hex.workspace = true
 rand_core.workspace = true

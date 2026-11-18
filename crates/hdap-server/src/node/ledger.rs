@@ -40,6 +40,7 @@ fn canonical(entry: &PrytaneionEntry) -> String {
         "origin_user_pubkey": entry.origin_user_pubkey,
         "origin_path": entry.origin_path,
         "sphragis": entry.sphragis,
+        "namespace_owner": entry.namespace_owner,
         "replicas": replicas,
         "deletions": deletions,
         "created_at": entry.created_at,
@@ -73,6 +74,7 @@ pub fn entry_to_json(entry: &PrytaneionEntry) -> Value {
         "origin_user_pubkey": entry.origin_user_pubkey,
         "origin_path": entry.origin_path,
         "sphragis": entry.sphragis,
+        "namespace_owner": entry.namespace_owner,
         "replicas": entry.replicas,
         "deletions": entry.deletions,
         "created_at": entry.created_at,
@@ -123,6 +125,11 @@ pub fn entry_from_json(value: &Value) -> Option<PrytaneionEntry> {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string(),
+        namespace_owner: value
+            .get("namespace_owner")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
         replicas: strings("replicas"),
         deletions: strings("deletions"),
         created_at: value
@@ -167,6 +174,10 @@ pub fn merge(st: &mut State, incoming: &PrytaneionEntry) -> bool {
     }
     if entry.sphragis.is_empty() && !incoming.sphragis.is_empty() {
         entry.sphragis = incoming.sphragis.clone();
+        changed = true;
+    }
+    if entry.namespace_owner.is_empty() && !incoming.namespace_owner.is_empty() {
+        entry.namespace_owner = incoming.namespace_owner.clone();
         changed = true;
     }
     if incoming.created_at != 0 && (entry.created_at == 0 || incoming.created_at < entry.created_at)
@@ -239,11 +250,11 @@ pub fn pull_from_peer(
     let client = FedHttpClient::new(&peer.endpoint, peer.tls_pin.clone())
         .map_err(|e| format!("bad peer endpoint: {e}"))?;
     let local_digest = {
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         digest(&st.prytaneion)
     };
     let path = format!("/homospondoi/ledger?digest={local_digest}");
-    let seed = node.state.lock().unwrap().node_sign_seed;
+    let seed = node.lock_state().node_sign_seed;
     let sign_key = ed25519_dalek::SigningKey::from_bytes(&seed);
     let resp = client
         .get_with_fed_auth(&path, &node.cfg.server_id, &sign_key, None)
@@ -254,7 +265,7 @@ pub fn pull_from_peer(
     let value: Value =
         serde_json::from_slice(&resp.body).map_err(|_| "peer sent non-json ledger")?;
     let merged = {
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         merge_body(&mut st, &value)
     };
     Ok(merged)
@@ -272,10 +283,10 @@ pub fn push_to_peer(
     let client = FedHttpClient::new(&peer.endpoint, peer.tls_pin.clone())
         .map_err(|e| format!("bad peer endpoint: {e}"))?;
     let body = {
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         serde_json::json!({ "entries": snapshot(&st.prytaneion) }).to_string()
     };
-    let seed = node.state.lock().unwrap().node_sign_seed;
+    let seed = node.lock_state().node_sign_seed;
     let sign_key = ed25519_dalek::SigningKey::from_bytes(&seed);
     let resp = client
         .post_with_fed_auth("/homospondoi/ledger", &body, &node.cfg.server_id, &sign_key)
@@ -299,7 +310,7 @@ pub fn find_on_peer(
     }
     let client = FedHttpClient::new(&peer.endpoint, peer.tls_pin.clone()).ok()?;
     let path = format!("/homospondoi/ledger?hash={hash}");
-    let seed = node.state.lock().unwrap().node_sign_seed;
+    let seed = node.lock_state().node_sign_seed;
     let sign_key = ed25519_dalek::SigningKey::from_bytes(&seed);
     let resp = client
         .get_with_fed_auth(&path, &node.cfg.server_id, &sign_key, None)
@@ -321,6 +332,7 @@ mod tests {
             origin_server: "pyle-a".to_string(),
             origin_user: "jose_0123456789abcdef".to_string(),
             origin_user_pubkey: "aa".repeat(32),
+            namespace_owner: "jose_0123456789abcdef".to_string(),
             origin_path: "docs/a.txt".to_string(),
             sphragis: "sig".to_string(),
             replicas: vec!["pyle-b:jose/docs/a.txt".to_string()],

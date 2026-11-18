@@ -59,7 +59,10 @@ impl IdentityModule {
         if sign_pub_bytes.len() != 32 {
             return Response::json(400, json_err("sign_pubkey must be 32 bytes"));
         }
-        let sign_pub: [u8; 32] = sign_pub_bytes.as_slice().try_into().unwrap();
+        let sign_pub: [u8; 32] = match sign_pub_bytes.as_slice().try_into() {
+            Ok(key) => key,
+            Err(_) => return Response::json(400, json_err("invalid sign_pubkey length")),
+        };
         // Find the signature in the document
         let sig_field = match doc.sigs.first() {
             Some(s) => s,
@@ -73,7 +76,10 @@ impl IdentityModule {
         if sig_bytes.len() != 64 {
             return Response::json(400, json_err("invalid signature format"));
         }
-        let sig_arr: [u8; 64] = sig_bytes.as_slice().try_into().unwrap();
+        let sig_arr: [u8; 64] = match sig_bytes.as_slice().try_into() {
+            Ok(sig) => sig,
+            Err(_) => return Response::json(400, json_err("invalid signature length")),
+        };
         let sig = Ed25519Signature::from_bytes(&sig_arr);
         // Compute signature input (canonical document without our signature).
         // The signature must stay in the list: `signature_input` omits that
@@ -91,9 +97,16 @@ impl IdentityModule {
             return Response::json(401, json_err("prosopeion self-signature invalid"));
         }
 
-        let mut st = node.state.lock().unwrap();
-        if st.users.contains_key(&user_id) {
-            return Response::json(409, json_err("identity already registered"));
+        let mut st = node.lock_state();
+        if let Some(existing) = st.users.get(&user_id) {
+            if existing.sign_pub_hex == sign_pub_hex {
+                // Idempotent re-registration: the caller proved possession of
+                // the same key, so answer exactly like the first registration.
+                // Random probes with a different key still get a plain 409 and
+                // cannot be used to enumerate which nicknames are taken.
+                return Response::json(201, serde_json::json!({ "user_id": user_id }).to_string());
+            }
+            return Response::json(409, json_err("identity key conflict"));
         }
         let user = UserRecord {
             user_id: user_id.clone(),
@@ -104,6 +117,7 @@ impl IdentityModule {
             otp_anchor_hex,
             otp_k,
             created_at: doc.created_at,
+            v2_f3: true,
             home_pyle: self.cfg.server_id.clone(),
         };
         st.users.insert(user_id.clone(), user.clone());
@@ -265,7 +279,7 @@ impl IdentityModule {
             return Err(Response::json(400, json_err("properties incomplete")));
         }
 
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         if let Some(existing) = st.users.get(&user_id) {
             if existing.sign_pub_hex != pubkey_hex {
                 return Err(Response::json(
@@ -298,6 +312,7 @@ impl IdentityModule {
                 otp_anchor_hex,
                 otp_k,
                 created_at: props.created_at,
+                v2_f3: true,
                 home_pyle: new_pyle.clone(),
             },
         );
@@ -368,7 +383,7 @@ impl IdentityModule {
         }
 
         let (stored_pub, current_home, properties, adeia, old_text) = {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             let Some(user) = st.users.get(&user_id) else {
                 return Response::json(404, json_err("user not registered"));
             };
@@ -422,7 +437,7 @@ impl IdentityModule {
         }
 
         let bytes = text.as_bytes();
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         let sealed = hdap_core::crypto::aead_seal(&st.master_key, bytes);
         st.objects.insert(
             State::key(&user_id, "diadosi.hdap"),
@@ -444,7 +459,7 @@ impl IdentityModule {
     /// after login, so the first snapshot already shows the backup as home.
     pub fn maybe_promote_fallback(&self, node: &crate::node::Node, user_id: &str) -> bool {
         let (home, peer) = {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             let Some(user) = st.users.get(user_id) else {
                 return false;
             };
@@ -512,7 +527,7 @@ impl IdentityModule {
             Ok(resp) if (200..300).contains(&resp.status) => return false,
             _ => {}
         }
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         if let Some(user) = st.users.get_mut(user_id) {
             if user.home_pyle == home {
                 user.home_pyle = node.cfg.server_id.clone();
@@ -538,7 +553,7 @@ impl IdentityModule {
         outgoing["ttl"] = serde_json::json!(ttl);
         let payload = outgoing.to_string();
         let peers: Vec<_> = {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             st.peers
                 .values()
                 .filter(|p| !p.endpoint.trim().is_empty())
@@ -567,7 +582,7 @@ impl IdentityModule {
         if nickname.is_empty() && user_id.is_empty() {
             return Response::json(400, json_err("nickname or user_id query required"));
         }
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         let found = if !user_id.is_empty() {
             st.users.get(&user_id)
         } else {
@@ -665,7 +680,10 @@ impl IdentityModule {
                 json_err("sign_pubkey must be 32 bytes"),
             ));
         }
-        let sign_pub: [u8; 32] = sign_pub_bytes.as_slice().try_into().unwrap();
+        let sign_pub: [u8; 32] = match sign_pub_bytes.as_slice().try_into() {
+            Ok(key) => key,
+            Err(_) => return Err(Response::json(400, json_err("invalid sign_pubkey length"))),
+        };
         let sig_field = match doc.sigs.first() {
             Some(s) => s,
             None => {
@@ -683,7 +701,10 @@ impl IdentityModule {
         if sig_bytes.len() != 64 {
             return Err(Response::json(400, json_err("invalid signature format")));
         }
-        let sig_arr: [u8; 64] = sig_bytes.as_slice().try_into().unwrap();
+        let sig_arr: [u8; 64] = match sig_bytes.as_slice().try_into() {
+            Ok(sig) => sig,
+            Err(_) => return Err(Response::json(400, json_err("invalid signature length"))),
+        };
         let sig = Ed25519Signature::from_bytes(&sig_arr);
         let input = match doc.signature_input(0) {
             Ok(i) => i,
@@ -709,7 +730,7 @@ impl IdentityModule {
             return Err(Response::json(400, json_err("invalid global id")));
         }
         // For existing identities, require session user to match (prevent account takeover)
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         let is_new = !st.users.contains_key(&user_id);
         if !is_new {
             let session_user = match session_user {
@@ -738,6 +759,7 @@ impl IdentityModule {
                 otp_anchor_hex: otp_anchor_hex.clone(),
                 otp_k,
                 created_at: doc.created_at,
+                v2_f3: true,
                 home_pyle: self.cfg.server_id.clone(),
             };
             st.users.insert(user_id.clone(), user.clone());
@@ -787,6 +809,7 @@ impl IdentityModule {
                 otp_anchor_hex,
                 otp_k,
                 created_at: existing.created_at,
+                v2_f3: true,
                 home_pyle: existing.home_pyle.clone(),
             },
         );
@@ -860,7 +883,7 @@ mod house_move_tests {
             (uid.as_str(), "pyle-new", 2)
         );
         {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             assert_eq!(
                 st.users[&uid].sign_pub_hex,
                 hex::encode(key.verifying_key().to_bytes())
@@ -946,7 +969,7 @@ mod house_move_tests {
         let proxy = signed_diadosi(user, &key, 1, "pyle-a", &["pyle-b"], &properties, &adeia);
 
         {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             st.users.insert(
                 uid.clone(),
                 UserRecord {
@@ -958,6 +981,7 @@ mod house_move_tests {
                     otp_anchor_hex: "cc".repeat(32),
                     otp_k: 4096,
                     created_at: 1000,
+                    v2_f3: true,
                     home_pyle: "pyle-a".into(),
                 },
             );
@@ -993,7 +1017,7 @@ mod house_move_tests {
             m.maybe_promote_fallback(&node, &uid),
             "a listed backup must take over when the home does not answer"
         );
-        assert_eq!(node.state.lock().unwrap().users[&uid].home_pyle, "pyle-b");
+        assert_eq!(node.lock_state().users[&uid].home_pyle, "pyle-b");
         assert!(
             !m.maybe_promote_fallback(&node, &uid),
             "once promoted, this pyle is the home and must stop probing"
@@ -1009,6 +1033,6 @@ mod house_move_tests {
         body["signature"] = json!(base64::engine::general_purpose::STANDARD.encode([0u8; 64]));
         let err = m.apply_house_move(&node, &body, None, None).unwrap_err();
         assert_eq!(err.status, 401);
-        assert!(node.state.lock().unwrap().users.is_empty());
+        assert!(node.lock_state().users.is_empty());
     }
 }

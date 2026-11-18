@@ -1,13 +1,15 @@
 # Banda, Economia e Reputação
 
-**HDAP v1.001 — Themelio · Epoptia**
+*Revisão de 2026-11-17.*
+
+**HDAP v2.0 — Téleia vási · Teleios**
 
 **Escrito por Thaís (op3n/op3ny)**
 
 ---
 
-**Leia primeiro:** [userguide3.md](userguide3.md) (Arquivos, Documentos e Permissões)
-**Próximo:** [userguide5.md](userguide5.md) (Federação, Réplicas e Sucessão)
+**Leia primeiro:** [guia-3-arquivos.md](guia-3-arquivos.md) (Arquivos, Documentos e Permissões)
+**Próximo:** [guia-5-federacao.md](guia-5-federacao.md) (Federação, Réplicas e Sucessão)
 
 ---
 
@@ -133,4 +135,4 @@ Para o usuário comum, isso raramente aparece. Você vê o preço do seu pyle, p
 
 ---
 
-**Leia agora:** [userguide5.md](userguide5.md) — Federação, Réplicas e Sucessão
+**Leia agora:** [guia-5-federacao.md](guia-5-federacao.md) — Federação, Réplicas e Sucessão

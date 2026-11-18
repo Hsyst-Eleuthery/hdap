@@ -9,11 +9,11 @@ use std::path::{Path, PathBuf};
 use hdap_cli::flow::FlowError;
 use hdap_cli::identity_store::{self, load, save};
 use hdap_cli::{
-    accept_transfer, authenticate, band_mochthos, delete, download, fetch_node_facts, fetch_prices,
-    list_ktema, publish_alias, register, request_transfer, resolve, transfer_inbox, transfer_owner,
-    upload_with_band, HttpClient, Identity,
+    accept_transfer, authenticate, band_mochthos, delete, download, fetch_health, fetch_prices,
+    list_ktema, publish_alias, register, request_transfer, resolve, rotate_omphalos,
+    transfer_inbox, transfer_owner, upload_with_band, HttpClient, Identity,
 };
-use hdap_core::crypto::sha256_hex;
+use hdap_core::{crypto::sha256_hex, RecoveryPhrase, RECOVERY_VERSION};
 
 const KRYPTE: &str = "krypte.hdap";
 const PROSOPEION: &str = "prosopeion.hdap";
@@ -37,18 +37,22 @@ fn print_usage() {
            --host HOST     node host (default 127.0.0.1)\n  \
            --port PORT     node port (default 8443)\n  \
            --tls-pin PIN   sha256 hex of node cert (enables TLS)\n  \
-           --pass PASS     identity passphrase\n  \
+           --pass-env VAR  read identity passphrase from an environment variable\n  \
+           --pass-file FILE  read identity passphrase from a file (one line)\n  \
+           --pass PASS     passphrase on argv (DISCOURAGED: visible in process list)\n  \
            --home DIR      identity dir (default ./)\n  \
            --help          show usage\n  \
            --version       show version\n\
          \n\
          COMMANDS:\n  \
-           init NICKNAME            create identity\n  \
+           init NICKNAME            create identity (shows recovery phrase)\n  \
+           recover PHRASE NICKNAME  recover identity from a recovery phrase\n  \
            register                 register identity on the node\n  \
            auth                     login (3FA) and print token\n  \
            whoami                   print this identity's global id\n  \
            band TOKEN TARGET_BITS   claim band credit via PoW\n  \
-           health                   show node facts\n  \
+           health                   show node facts / Ángelma\n  \
+           rotate TOKEN             rotate the OTP anchor with the identity key\n  \
            upload TOKEN OWNER PATH FILE   upload a file\n  \
            download TOKEN OWNER PATH OUT  download a file\n  \
            delete TOKEN OWNER PATH        delete a file\n  \
@@ -96,7 +100,29 @@ fn parse_global_from<I: Iterator<Item = String>>(mut args: I) -> (CmdArgs, Vec<S
                     .expect("port")
             }
             "--tls-pin" => cmd_args.tls_pin = Some(args.next().expect("--tls-pin needs a value")),
-            "--pass" => cmd_args.pass = args.next().expect("--pass needs a value"),
+            "--pass-env" => {
+                let var = args.next().expect("--pass-env needs a variable name");
+                cmd_args.pass = std::env::var(&var).unwrap_or_else(|_| {
+                    eprintln!("hdap-cli: environment variable {var} is not set");
+                    std::process::exit(2);
+                });
+            }
+            "--pass-file" => {
+                let path = args.next().expect("--pass-file needs a path");
+                cmd_args.pass = std::fs::read_to_string(&path)
+                    .unwrap_or_else(|e| {
+                        eprintln!("hdap-cli: cannot read passphrase file {path}: {e}");
+                        std::process::exit(2);
+                    })
+                    .trim_end_matches(['\r', '\n'])
+                    .to_string();
+            }
+            "--pass" => {
+                eprintln!(
+                    "hdap-cli: aviso — --pass expõe a senha na lista de processos; prefira --pass-env, --pass-file ou prompt"
+                );
+                cmd_args.pass = args.next().expect("--pass needs a value");
+            }
             "--home" => cmd_args.home = PathBuf::from(args.next().expect("--home needs a value")),
             "--help" | "-h" => {
                 print_usage();
@@ -123,25 +149,69 @@ fn identity_paths(home: &Path) -> (PathBuf, PathBuf) {
     (home.join(KRYPTE), home.join(PROSOPEION))
 }
 
+/// Read a passphrase without echoing it. `stty` is a small dependency-free way
+/// to disable terminal echo; when stdin is not a TTY (pipes, CI) it simply
+/// fails and we still read the line, never from argv.
+fn prompt_passphrase(label: &str) -> String {
+    use std::io::{BufRead, Write};
+    eprint!("hdap-cli: {label}: ");
+    let _ = std::io::stderr().flush();
+    #[cfg(unix)]
+    let _ = std::process::Command::new("stty").arg("-echo").status();
+    let mut line = String::new();
+    let read = std::io::stdin().lock().read_line(&mut line);
+    #[cfg(unix)]
+    {
+        let _ = std::process::Command::new("stty").arg("echo").status();
+        eprintln!();
+    }
+    if read.is_err() || line.is_empty() {
+        eprintln!("hdap-cli: could not read passphrase");
+        std::process::exit(2);
+    }
+    line.trim_end_matches(['\r', '\n']).to_string()
+}
+
+/// Fill `args.pass` from env/file/TTY, in that order of safety.
+fn resolve_passphrase(args: &mut CmdArgs, confirm: bool) {
+    if !args.pass.is_empty() {
+        return;
+    }
+    args.pass = prompt_passphrase("identity passphrase");
+    if confirm && args.pass != prompt_passphrase("confirm passphrase") {
+        eprintln!("hdap-cli: passphrases do not match");
+        std::process::exit(2);
+    }
+}
+
 fn load_identity(a: &CmdArgs) -> Identity {
     let (k, p) = identity_paths(&a.home);
     load(a.pass.as_bytes(), &k, &p).expect("failed to open identity (init first)")
 }
 
 fn main() {
-    let (args, rest) = parse_global();
+    let (mut args, rest) = parse_global();
     let Some(cmd) = rest.first().map(String::as_str) else {
         print_usage();
         std::process::exit(1);
     };
+    let needs_identity = !matches!(
+        cmd,
+        "health" | "resolve" | "prices" | "download" | "delete" | "list"
+    );
+    if needs_identity {
+        resolve_passphrase(&mut args, cmd == "init");
+    }
     let tail: Vec<String> = rest[1..].to_vec();
     match cmd {
         "init" => cmd_init(&args, &tail),
+        "recover" => cmd_recover(&args, &tail),
         "register" => cmd_register(&args),
         "auth" => cmd_auth(&args),
         "whoami" => cmd_whoami(&args),
         "band" => cmd_band(&args, &tail),
         "health" => cmd_health(&args),
+        "rotate" => cmd_rotate(&args, &tail),
         "upload" => cmd_upload(&args, &tail),
         "download" => cmd_download(&args, &tail),
         "delete" => cmd_delete(&args, &tail),
@@ -171,15 +241,69 @@ fn cmd_init(args: &CmdArgs, tail: &[String]) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let identity = Identity::try_generate(nickname, now).unwrap_or_else(|e| {
-        eprintln!("hdap-cli: invalid nickname: {e}");
-        std::process::exit(2);
-    });
+    // Derive the identity from a recovery phrase so the user can rebuild it
+    // from the phrase alone if krypte.hdap is lost.
+    let (recovery, seed) = RecoveryPhrase::generate();
+    let identity = Identity::from_seed(nickname, now, &seed);
     let (k, p) = identity_paths(&args.home);
     save(&identity, args.pass.as_bytes(), &k, &p).expect("failed to save identity");
     println!(
         "identity {} created; registered on a node with `register`",
         identity.global_id()
+    );
+    println!();
+    println!("  RECOVERY PHRASE (write this down, keep it offline):");
+    println!("      {}", recovery.phrase());
+    println!("  Do not screenshot or store this phrase digitally. Write it on paper.");
+    println!("  With this phrase and your passphrase you can run:");
+    println!("      hdap-cli recover <PHRASE> <NICKNAME>");
+    println!();
+    eprintln!(
+        "hdap-cli: BACK UP NOW — copy `{}` to a second physical location and store the passphrase separately. \
+         There is no central recovery: losing the vault or the passphrase loses the identity. \
+         Your recovery phrase lets you rebuild the identity from the phrase alone.",
+        k.display()
+    );
+}
+
+fn cmd_recover(args: &CmdArgs, tail: &[String]) {
+    let phrase = tail.first().map(String::as_str).unwrap_or("");
+    let nickname = tail.get(1).map(String::as_str).unwrap_or("user");
+    if phrase.is_empty() {
+        eprintln!("hdap-cli: recover requires a recovery phrase (24 BIP-39 words)");
+        std::process::exit(1);
+    }
+    // Strip the version prefix if present, then validate the 24 words.
+    let words_only = phrase
+        .strip_prefix(RECOVERY_VERSION)
+        .map(|s| s.trim())
+        .unwrap_or(phrase);
+    let recovery = match RecoveryPhrase::from_words(words_only) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("hdap-cli: invalid recovery phrase: {e:?}");
+            std::process::exit(2);
+        }
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let seed = *recovery.seed;
+    let identity = Identity::from_seed(nickname, now, &seed);
+    let (k, p) = identity_paths(&args.home);
+    // Ask for a passphrase to seal the recovered vault.
+    let pass = if args.pass.is_empty() {
+        prompt_passphrase("identity passphrase")
+    } else {
+        args.pass.clone()
+    };
+    save(&identity, pass.as_bytes(), &k, &p).expect("failed to save identity");
+    println!("identity {} recovered from phrase", identity.global_id());
+    eprintln!(
+        "hdap-cli: BACK UP NOW — copy `{}` to a second physical location and store the passphrase separately. \
+         There is no central recovery: losing the vault or the passphrase loses the identity.",
+        k.display()
     );
 }
 
@@ -213,10 +337,16 @@ fn cmd_auth(args: &CmdArgs) {
                         step = next as usize;
                         continue;
                     }
-                    _ => panic!("auth failed: {body}"),
+                    _ => {
+                        eprintln!("auth failed: {body}");
+                        std::process::exit(1);
+                    }
                 }
             }
-            Err(e) => panic!("auth failed: {e}"),
+            Err(e) => {
+                eprintln!("auth failed: {e}");
+                std::process::exit(1);
+            }
         }
     };
     // The chain moved one step past the one we just proved.
@@ -244,9 +374,47 @@ fn cmd_band(args: &CmdArgs, tail: &[String]) {
 
 fn cmd_health(args: &CmdArgs) {
     let c = client(args);
-    let (server_id, node_enc_pub) = fetch_node_facts(&c).expect("health failed");
-    println!("server_id={server_id}");
-    println!("node_enc_pub={node_enc_pub}");
+    let v = fetch_health(&c).expect("health failed");
+    println!("server_id={}", v["server_id"].as_str().unwrap_or(""));
+    println!(
+        "protocol=v{} ({})",
+        v["protocol_version"].as_u64().unwrap_or(0),
+        v["protocol_codename"].as_str().unwrap_or("")
+    );
+    println!("version={}", v["version"].as_str().unwrap_or(""));
+    println!("node_enc_pub={}", v["node_enc_pub"].as_str().unwrap_or(""));
+    println!("time_utc={}", v["time_utc"].as_u64().unwrap_or(0));
+    println!("date_utc={}", v["date_utc"].as_str().unwrap_or(""));
+    println!("uptime_secs={}", v["uptime_secs"].as_u64().unwrap_or(0));
+    println!("users={}", v["users"].as_u64().unwrap_or(0));
+    println!("files={}", v["files"].as_u64().unwrap_or(0));
+    if let Some(motd) = v["motd"].as_str().filter(|s| !s.is_empty()) {
+        println!("--- Ángelma ---");
+        println!("{motd}");
+    }
+}
+
+/// Rotate the OTP anchor and update the local vault/prosopeion in one step.
+fn cmd_rotate(args: &CmdArgs, tail: &[String]) {
+    let Some(token) = tail.first().map(String::as_str) else {
+        eprintln!("hdap-cli: rotate requires TOKEN (from auth)");
+        std::process::exit(1);
+    };
+    let identity = load_identity(args);
+    let c = client(args);
+    let rotated = rotate_omphalos(&c, token, &identity).expect("omphalos rotation failed");
+    let updated = Identity {
+        otp_k: rotated.seed_iter as usize,
+        otp_anchor: rotated.otp_anchor,
+        ..identity
+    };
+    let (k, p) = identity_paths(&args.home);
+    save(&updated, args.pass.as_bytes(), &k, &p).expect("failed to save rotated identity");
+    identity_store::save_step(&args.home, 1).expect("could not reset the otp step");
+    println!(
+        "omphalos rotated: seed_iter={} — run `auth` again",
+        rotated.seed_iter
+    );
 }
 
 fn cmd_upload(args: &CmdArgs, tail: &[String]) {
@@ -509,5 +677,95 @@ mod tests {
         let (args, rest) = parse(&["--no", "x"]);
         assert_eq!(args.port, 8443);
         assert_eq!(rest, vec!["--no", "x"]);
+    }
+
+    /// End-to-end recovery flow against a real in-process server:
+    /// create identity from a recovery phrase → register → login → delete
+    /// the vault → recover from the phrase → login again.
+    #[test]
+    fn recovery_phrase_full_flow_against_server() {
+        use hdap_cli::flow::{authenticate, register};
+        use hdap_cli::http_client::HttpClient;
+        use hdap_core::identity::Identity;
+        use hdap_core::vault::{Vault, VaultSecrets};
+        use hdap_core::RecoveryPhrase;
+        use hdap_server::http;
+        use hdap_server::Node;
+        use hdap_tls;
+        use std::net::TcpListener;
+        use std::sync::Arc;
+        use std::thread;
+
+        // Self-signed TLS node identity (AME-09); the client pins its cert.
+        let tls_identity = hdap_tls::self_signed("node-a", &["127.0.0.1", "localhost"]).unwrap();
+        let pin = tls_identity.pin();
+        let tls = tls_identity.server_config().unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let cfg = hdap_server::Config {
+            server_id: "node-a".to_string(),
+            choregia_per_mochthos: 1024,
+            pow: hdap_core::pow::PowPolicy::new(4, 1, 6),
+            require_entry_pow: false,
+            require_content_signature: false,
+            rate_limit_per_sec: 0,
+            ..hdap_server::Config::default()
+        };
+        let mut node = Node::new(cfg);
+        node.tls_pin = Some(pin.clone());
+        let node_ref = Arc::new(node);
+        let handle = Arc::clone(&node_ref);
+        thread::spawn(move || {
+            let _ = http::serve_tls(listener, 10 * 1024 * 1024, tls, move |req| {
+                handle.handle(&req)
+            });
+        });
+        let client = HttpClient::new_tls("127.0.0.1", port, pin.clone());
+
+        let tmp = std::env::temp_dir().join(format!("hdap-e2e-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let krypte = tmp.join("krypte.hdap");
+        let pros = tmp.join("prosopeion.hdap");
+
+        // 1. Create identity from a recovery phrase.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let (recovery, seed) = RecoveryPhrase::generate();
+        let id = Identity::from_seed("recover_test", now, &seed);
+        let words = recovery.words_only();
+
+        // 2. Save vault + prosopeion to disk.
+        identity_store::save(&id, b"passphrase", &krypte, &pros).unwrap();
+
+        // 3. Register on the server.
+        let reg = register(&client, &id).unwrap();
+        assert!(!reg.user_id.is_empty());
+
+        // 4. Login (first login uses OTP step 1).
+        let auth = authenticate(&client, &id, &reg.user_id, 1).unwrap();
+        assert!(!auth.token.is_empty());
+
+        // 5. Simulate loss of the vault: delete krypte.hdap.
+        std::fs::remove_file(&krypte).unwrap();
+
+        // 6. Recover identity from the recovery phrase.
+        let recovered = RecoveryPhrase::from_words(&words).unwrap();
+        let recovered_id = Identity::from_seed("recover_test", now, &recovered.seed);
+        let secrets = VaultSecrets {
+            seed: recovered_id.seed(),
+            sign_secret: recovered_id.sign_key.to_bytes(),
+            enc_secret: recovered_id.enc_secret.to_bytes(),
+            recovery_root: recovered_id.recovery_root,
+        };
+        let vault = Vault::seal(&secrets, b"passphrase");
+        std::fs::write(&krypte, vault.to_bytes()).unwrap();
+
+        // 7. Login again with the recovered identity. Step 2 because step 1
+        // was already consumed by the first login.
+        let auth2 = authenticate(&client, &recovered_id, &reg.user_id, 2).unwrap();
+        assert!(!auth2.token.is_empty());
     }
 }

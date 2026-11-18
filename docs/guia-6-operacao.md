@@ -1,19 +1,21 @@
 # Aplicativos e Operação
 
-**HDAP v1.001 — Themelio · Epoptia**
+*Revisão de 2026-11-17.*
+
+**HDAP v2.0 — Téleia vási · Teleios**
 
 **Escrito por Thaís (op3n/op3ny)**
 
 ---
 
-**Leia primeiro:** [userguide5.md](userguide5.md) (Federação, Réplicas e Sucessão)
+**Leia primeiro:** [guia-5-federacao.md](guia-5-federacao.md) (Federação, Réplicas e Sucessão)
 **Guia prático:** [guia-de-execucao.md](guia-de-execucao.md)
 
 ---
 
 ## Os dois programas
 
-O HDAP é feito de duas peças que trabalham juntas, cada uma com um papel bem definido. A primeira é o **pyle**, o servidor. Ele guarda as casas, aplica as permissões, participa da federação, serve HTTP/TLS e mantém o estado. A segunda é o **cliente**, que existe em duas formas: o `hdap` no terminal e o `hdap-gui` com tela nativa. As duas formas fazem as mesmas operações essenciais, e escolher uma é uma questão de gosto e de hábito.
+O HDAP é feito de duas peças que trabalham juntas, cada uma com um papel bem definido. A primeira é o **pyle**, o servidor. Ele guarda as casas, aplica as permissões, participa da federação, serve HTTP/TLS e mantém o estado. A segunda é o **cliente**, que existe em duas formas: o `hdap-cli` no terminal e o `hdap-gui` com tela nativa. As duas formas fazem as mesmas operações essenciais, e escolher uma é uma questão de gosto e de hábito.
 
 O pyle não tem interface gráfica, e isso é intencional. Ele é um serviço, feito para rodar como processo em segundo plano, com log, configuração e scripts. O cliente é a parte que você usa, e a GUI é apenas uma camada de conveniência sobre o mesmo núcleo. Se um dia a interface mudar, a identidade e os arquivos continuam os mesmos, porque o que importa está no protocolo, não na tela.
 
@@ -33,11 +35,23 @@ Depois do registro, a GUI abre a tela principal, com a sua casa, os seus arquivo
 
 ## Primeiros passos com a CLI
 
-A CLI segue a mesma lógica, em forma de comandos. O primeiro passo é inicializar uma identidade, com `hdap init --nickname <nome> --home <pasta>`. O comando cria o cofre, o `prosopeion` e o contador OTP. Em seguida, você registra a identidade em um pyle com `hdap register`, informando a URL e confirmando o pin. Depois do registro, `hdap whoami` mostra o ID global, que é o valor que outras pessoas usarão para conceder permissões.
+O executável se chama `hdap-cli`. A sintaxe é `hdap-cli [GLOBAIS] COMANDO [ARGUMENTOS]`, e as opções globais podem vir antes ou depois do comando. O primeiro passo é criar a identidade com `init <nickname>`; em seguida vem `register` no pyle escolhido, `auth` para obter o token da sessão e `whoami` para conferir o ID global.
 
-O restante dos comandos segue o mesmo padrão: o verbo, o argumento principal e as opções globais. `upload`, `download`, `delete`, `ls`, `mkdir`, `mv`, `cp`, `pwd`, `tree`, `perm`, `band`, `daemon`, `server`, `fuzz`. As flags globais, como `--home`, `--server` e `--token`, podem vir antes ou depois do comando; a CLI foi ajustada para aceitar as duas ordens, porque a ordem natural varia de pessoa para pessoa.
+```bash
+export HDAP_PASS='uma-senha-forte'
+export PIN='impressão digital do certificado do nó'
 
-Um detalhe que confunde no começo: o pyle é o servidor; a casa é o espaço. `hdap server` sobe um pyle, e `hdap daemon` sobe um pyle com interface de console. Nenhum dos dois é o cliente. Para usar a casa, você usa `upload`, `download` e os demais comandos de arquivo.
+hdap-cli --home ~/.hdap --pass-env HDAP_PASS init thais
+hdap-cli --home ~/.hdap --pass-env HDAP_PASS --tls-pin "$PIN" register
+hdap-cli --home ~/.hdap --pass-env HDAP_PASS --tls-pin "$PIN" auth
+hdap-cli --home ~/.hdap --tls-pin "$PIN" whoami
+```
+
+A passphrase **não precisa** ir na linha de comando. A ordem preferida é `--pass-env NOME` (lê uma variável de ambiente), `--pass-file ARQUIVO` (lê uma linha de um arquivo) ou o prompt no terminal, com eco desligado. `--pass SENHA` ainda funciona, mas imprime um aviso: qualquer pessoa com acesso à lista de processos vê a senha. Os comandos `health`, `resolve`, `prices`, `download`, `delete` e `list` não pedem passphrase.
+
+Os comandos disponíveis são: `init`, `register`, `auth`, `whoami`, `band`, `health`, `rotate`, `upload`, `download`, `delete`, `list`, `alias`, `resolve`, `prices`, `transfer-request`, `transfer-inbox`, `transfer-accept` e `transfer-own`. As globais são `--host` (padrão `127.0.0.1`), `--port` (padrão `8443`), `--tls-pin`, `--pass-env`, `--pass-file`, `--pass`, `--home`, `--help` e `--version`. Um `--tls-pin` é obrigatório contra qualquer nó TLS; sem ele a CLI fala HTTP simples, o que só faz sentido em loopback com `--no-tls` no servidor.
+
+Um detalhe que confunde no começo: o pyle é o servidor; a casa é o espaço. O servidor é o `hdap-server`, separado do cliente. Para usar a casa, você usa `upload`, `download`, `delete`, `list` e as transferências.
 
 ---
 
@@ -71,6 +85,25 @@ Se o login falhar repetidamente, não insista às cegas. Verifique se o pyle est
 
 ---
 
+## Ángelma, UTC e saúde do nó
+
+A **Ángelma** é a mensagem que o pyle publica sobre si mesmo: uptime, usuários, arquivos, versão, protocolo e outros dados. Ela aparece no rodapé da GUI (passe o mouse para ver o texto e o carimbo UTC), no comando `health` e na rota `GET /motd` do servidor.
+
+```bash
+hdap-cli --tls-pin "$PIN" health
+```
+
+A saída traz `protocol=v2 (Teleios)`, `version`, `server_id`, `time_utc`, `date_utc`, `uptime_secs`, `users`, `files` e, quando configurada, a Ángelma. O `time_utc` é um inteiro com segundos desde 1970-01-01 às 00:00 UTC; `date_utc` é a mesma informação em texto. Nenhum dos dois depende do fuso de quem pergunta, e toda resposta HTTP carrega o cabeçalho `X-HDAP-Server-Time` com o instante do nó.
+
+Para rotacionar a âncora OTP do seu login, use `rotate TOKEN` na CLI ou o botão 🔑 da GUI. O comando exige a chave de identidade, não apenas o token, e regrava o cofre local com a nova âncora. Depois rode `auth` de novo:
+
+```bash
+hdap-cli --pass-env HDAP_PASS --home ~/.hdap --tls-pin "$PIN" rotate "$TOKEN"
+hdap-cli --pass-env HDAP_PASS --home ~/.hdap --tls-pin "$PIN" auth
+```
+
+---
+
 ## Operação: rodando um pyle
 
 Rodar um pyle é uma tarefa de operador, e ela tem requisitos próprios. Você precisa de um servidor com disco, de um certificado TLS válido, de uma configuração de portas e de uma política de backup. O guia de execução cobre os detalhes, mas vale registrar aqui os princípios que não mudam.
@@ -85,11 +118,25 @@ Se você só quer alcançar a rede, sem operar um nó, os pyles oficiais mantido
 
 ---
 
+## Operação v2: novas opções do servidor
+
+Além das opções clássicas (`--listen`, `--advertise`, `--data`, `--id`, `--moira`, `--max-upload`, `--rate-limit`, `--pow-*`), a geração Teleios acrescentou:
+
+| Opção | Para que serve | Padrão |
+|---|---|---|
+| `--motd TEXTO` / `--motd-file ARQUIVO` | define a Ángelma, com tags `HDAP{[uptime]}`, `HDAP{[users]}`, `HDAP{[protocol]}`, `HDAP{[date_utc]}` etc. | vazia |
+| `--master-key-file ARQUIVO` | guarda a chave mestra dos blobs fora do banco (64 hex = 32 bytes, `0600` em Unix) | desligado |
+| `--max-connections N` | teto de conexões simultâneas; acima dele, `503` | `256` |
+| `--cleanup-interval N` | segundos entre limpezas de desafios e sessões expirados; `0` desativa | `60` |
+| `--time-tolerance N` | tolerância de skew entre pyles federados; não afeta sessões | `300` |
+
+Quando `--motd` e `--motd-file` aparecem juntos, **o último vence** — os dois apenas atribuem a mesma configuração. A chave mestra precisa entrar no backup junto com o banco e o `tls.identity`: sem ela os blobs ficam ilegíveis, e sem o `tls.identity` o pin muda. Com a chave externa, o SQLite grava a linha zerada, e tokens de sessão são guardados somente como `v2:{sha256(...)}`.
+
+---
+
 ## Atualizações e compatibilidade
 
-O HDAP segue uma política de versionamento explícita. A versão `1.0` é o marco zero do protocolo, com o codinome **Themelio**, e o lançamento correspondente tem o codinome **Veritas Aeterna**. A versão **v1.001** mantém o protocolo **Themelio** (matriz v1) e recebe o codinome de lançamento **Epoptia**; ela corrige a edição e a avaliação das permissões na GUI. Correções, melhorias de interface, correções de bugs, vulnerabilidades, documentação e empacotamento geram versões `1.001`, `1.002` e assim por diante, e apenas o codinome do lançamento muda. Mudanças no protocolo geram uma nova versão maior, como `2.0`, e nesse caso os dois codinomes mudam.
-
-Essa política existe para que você saiba o que esperar. Uma versão `1.0xx` não quebra a compatibilidade do protocolo; ela corrige e melhora. Uma versão `2.0` pode introduzir mudanças incompatíveis, e o guia de migração acompanha o lançamento. Toda release atualiza a documentação e declara os dois codinomes na primeira página.
+A geração atual é **v2.0 — Téleia vási · Teleios**. Uma versão `v2.00x` corrige e melhora sem mudar a linguagem do protocolo; o formato `# VERSION: 1` continua valendo, e cofres e documentos v1 são lidos sem conversão. A política completa de codinomes, as regras de bump e o histórico estão em [VERSAO.md](VERSAO.md); cada release atualiza a documentação e as datas de revisão.
 
 Para o usuário, a recomendação é simples: mantenha o cliente e o pyle na mesma versão maior, leia as notas de release antes de atualizar e faça backup do cofre antes de qualquer mudança. A compatibilidade é um compromisso, mas o backup é a rede de segurança que nenhum compromisso substitui.
 
@@ -110,8 +157,10 @@ Um erro comum é achar que o servidor é o backup. Ele não é. O servidor é um
 | Termo | Definição simples |
 |---|---|
 | **pyle** | O servidor HDAP. |
-| **`hdap`** | O cliente de linha de comando. |
+| **`hdap-cli`** | O cliente de linha de comando. |
 | **`hdap-gui`** | O cliente com interface gráfica nativa. |
+| **Ángelma** | Mensagem do pyle com uptime, contadores, versão e protocolo. |
+| **UTC** | Relógio do protocolo: segundos desde 1970-01-01 às 00:00, sem fuso. |
 | **TOFU** | Confiar no certificado na primeira conexão e fixá-lo. |
 | **pin** | Impressão digital do certificado TLS do pyle. |
 | **`symbolon`** | Token de sessão local do pyle. |
@@ -130,7 +179,9 @@ Um erro comum é achar que o servidor é o backup. Ele não é. O servidor é um
 
 **O que faço se o pin do certificado mudar?** Confirme com o operador por um canal independente antes de aceitar. Uma mudança não anunciada pode ser um ataque.
 
-**Como sei qual versão estou usando?** A GUI mostra a versão no rodapé e no painel de status; a CLI responde a `--version`. A versão do protocolo e os codinomes aparecem na documentação da release.
+**Como sei qual versão estou usando?** A GUI mostra a versão no rodapé e no painel de status; a CLI responde a `--version`. Para conferir a geração do protocolo, rode `health`: `protocol_version` deve ser `2` e `protocol_codename`, `Teleios`. Os codinomes também aparecem na documentação da release.
+
+**Por que a CLI não aceita mais só `--pass`?** Aceita, mas avisa. `--pass` expõe a senha na lista de processos; `--pass-env`, `--pass-file` e o prompt do terminal evitam isso. Comandos que não precisam de identidade, como `health`, não pedem senha nenhuma.
 
 **Posso atualizar sem parar o pyle?** Depende do método de instalação. O guia de execução cobre a atualização com e sem downtime, e recomenda backup antes.
 

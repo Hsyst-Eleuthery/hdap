@@ -154,7 +154,7 @@ impl Default for DiscoveryModule {
 
 impl DiscoveryModule {
     fn enqueue(&self, job: Job) {
-        let mut jobs = self.jobs.lock().unwrap();
+        let mut jobs = crate::node::lock_recover(&self.jobs);
         if jobs.len() < MAX_JOBS {
             jobs.push_back(job);
         }
@@ -178,7 +178,7 @@ impl DiscoveryModule {
     pub(crate) fn enqueue_exchange(&self, peer_id: String) {
         // Collapse duplicates: anti-entropy and a fresh handshake often point
         // at the same peer in the same tick.
-        let mut jobs = self.jobs.lock().unwrap();
+        let mut jobs = crate::node::lock_recover(&self.jobs);
         let already = jobs
             .iter()
             .any(|j| matches!(j, Job::Exchange { peer_id: p } if p == &peer_id));
@@ -188,7 +188,7 @@ impl DiscoveryModule {
     }
 
     pub(crate) fn enqueue_ledger(&self, peer_id: String) {
-        let mut jobs = self.jobs.lock().unwrap();
+        let mut jobs = crate::node::lock_recover(&self.jobs);
         let already = jobs
             .iter()
             .any(|j| matches!(j, Job::Ledger { peer_id: p } if p == &peer_id));
@@ -198,7 +198,7 @@ impl DiscoveryModule {
     }
 
     fn enqueue_health(&self, peer_id: String) {
-        let mut jobs = self.jobs.lock().unwrap();
+        let mut jobs = crate::node::lock_recover(&self.jobs);
         let already = jobs
             .iter()
             .any(|j| matches!(j, Job::Health { peer_id: p } if p == &peer_id));
@@ -212,12 +212,12 @@ impl DiscoveryModule {
     /// callback `Verify` job is the only thing that may mark it verified or
     /// clear endpoint failures. An existing verified flag is preserved.
     pub(crate) fn record_seen(&self, node_id: &str, now: u64) {
-        let mut health = self.health.lock().unwrap();
+        let mut health = crate::node::lock_recover(&self.health);
         health.entry(node_id.to_string()).or_default().last_seen = now;
     }
 
     fn record_check(&self, node_id: &str, now: u64, ok: bool) {
-        let mut health = self.health.lock().unwrap();
+        let mut health = crate::node::lock_recover(&self.health);
         let h = health.entry(node_id.to_string()).or_default();
         h.last_checked = now;
         if ok {
@@ -231,7 +231,7 @@ impl DiscoveryModule {
     }
 
     fn seen_before(&self, event_id: &str, now: u64) -> bool {
-        let mut seen = self.seen.lock().unwrap();
+        let mut seen = crate::node::lock_recover(&self.seen);
         let cutoff = now.saturating_sub(SEEN_TTL_SECS);
         seen.retain(|_, ts| *ts >= cutoff);
         if seen.contains_key(event_id) {
@@ -252,12 +252,12 @@ impl DiscoveryModule {
 
     /// Local health snapshot, useful for diagnostics and tests.
     pub fn health_snapshot(&self) -> BTreeMap<String, PeerHealth> {
-        self.health.lock().unwrap().clone()
+        crate::node::lock_recover(&self.health).clone()
     }
 
     /// Expose the seen-set size for diagnostics/tests.
     pub fn seen_len(&self) -> usize {
-        self.seen.lock().unwrap().len()
+        crate::node::lock_recover(&self.seen).len()
     }
 
     /// Queue an exchange with every known pyle. Used by tests and by an
@@ -274,7 +274,7 @@ impl DiscoveryModule {
     pub(crate) fn run_tick(&self, node: &Node, now: u64) {
         let mut modified = false;
         for _ in 0..8 {
-            let job = self.jobs.lock().unwrap().pop_front();
+            let job = crate::node::lock_recover(&self.jobs).pop_front();
             let Some(job) = job else { break };
             match job {
                 Job::Verify {
@@ -306,7 +306,7 @@ impl DiscoveryModule {
                 }
                 Job::Ledger { peer_id } => {
                     let peer = {
-                        let st = node.state.lock().unwrap();
+                        let st = node.lock_state();
                         st.peers.get(&peer_id).cloned()
                     };
                     if let Some(peer) = peer {
@@ -411,7 +411,7 @@ impl DiscoveryModule {
         let mut untrusted = 0usize;
         let mut peers = Vec::new();
         {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             for peer in st.peers.values() {
                 if peer.node_id == node.cfg.server_id {
                     continue;
@@ -492,7 +492,7 @@ impl DiscoveryModule {
             return Response::json(200, json!({ "queued": false, "known": true }).to_string());
         }
         {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             if let Some(existing) = st.peers.get(&advert.node_id) {
                 if existing.sign_pub_hex != advert.sign_pub_hex {
                     return Response::json(409, json_err("peer id already uses another key"));
@@ -545,7 +545,7 @@ pub fn directory_digest(node: &Node) -> String {
 }
 
 pub(crate) fn adverts(node: &Node) -> Vec<PeerAdvert> {
-    let st = node.state.lock().unwrap();
+    let st = node.lock_state();
     st.peers
         .values()
         .filter(|p| p.node_id != node.cfg.server_id)
@@ -565,7 +565,7 @@ pub(crate) fn own_endpoint(node: &Node) -> String {
 }
 
 pub(crate) fn own_sign_pub(node: &Node) -> String {
-    let seed = node.state.lock().unwrap().node_sign_seed;
+    let seed = node.lock_state().node_sign_seed;
     hex::encode(
         ed25519_dalek::SigningKey::from_bytes(&seed)
             .verifying_key()
@@ -581,7 +581,7 @@ pub(crate) fn handshake_body(node: &Node) -> String {
         "tls_pin": node.tls_pin,
         "directory_digest": directory_digest(node),
         "ledger_digest": crate::node::ledger::digest(
-            &node.state.lock().unwrap().prytaneion
+            &node.lock_state().prytaneion
         ),
     })
     .to_string()
@@ -606,9 +606,7 @@ pub(crate) fn ingest_directory(
             continue;
         }
         let known = node
-            .state
-            .lock()
-            .unwrap()
+            .lock_state()
             .peers
             .get(&advert.node_id)
             .map(|p| p.sign_pub_hex == advert.sign_pub_hex)
@@ -667,7 +665,7 @@ fn verify_candidate(node: &Node, advert: &PeerAdvert, now: u64) -> bool {
     }
 
     {
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         match st.peers.get(&advert.node_id) {
             Some(existing) if existing.sign_pub_hex != advert.sign_pub_hex => return false,
             Some(_) => {}
@@ -698,7 +696,7 @@ fn verify_candidate(node: &Node, advert: &PeerAdvert, now: u64) -> bool {
 
 fn exchange_directory(node: &Node, peer_id: &str, now: u64) -> bool {
     let peer = {
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         st.peers.get(peer_id).cloned()
     };
     let Some(peer) = peer else { return false };
@@ -713,7 +711,7 @@ fn exchange_directory(node: &Node, peer_id: &str, now: u64) -> bool {
     client.io_timeout = Duration::from_secs(6);
     let digest = directory_digest(node);
     let path = format!("/homospondoi/directory?digest={digest}");
-    let seed = node.state.lock().unwrap().node_sign_seed;
+    let seed = node.lock_state().node_sign_seed;
     let sign_key = ed25519_dalek::SigningKey::from_bytes(&seed);
     let Ok(resp) = client.get_with_fed_auth(&path, &node.cfg.server_id, &sign_key, None) else {
         return false;
@@ -737,7 +735,7 @@ fn exchange_directory(node: &Node, peer_id: &str, now: u64) -> bool {
 
 fn health_check(node: &Node, peer_id: &str, _now: u64) -> bool {
     let peer = {
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         st.peers.get(peer_id).cloned()
     };
     let Some(peer) = peer else { return false };
@@ -779,7 +777,7 @@ fn gossip(node: &Node, advert: &PeerAdvert, event_id: &str, ttl: u8, skip: Optio
         "peer": advert.to_json(),
     })
     .to_string();
-    let seed = node.state.lock().unwrap().node_sign_seed;
+    let seed = node.lock_state().node_sign_seed;
     let sign_key = ed25519_dalek::SigningKey::from_bytes(&seed);
     for peer in peers.into_iter().take(GOSSIP_FANOUT) {
         let Ok(client) = FedHttpClient::new(&peer.endpoint, peer.tls_pin.clone()) else {
@@ -849,7 +847,7 @@ mod tests {
     }
 
     fn add_known(node: &Node, peer: &PeerAdvert) {
-        node.state.lock().unwrap().peers.insert(
+        node.lock_state().peers.insert(
             peer.node_id.clone(),
             PeerRecord {
                 node_id: peer.node_id.clone(),
@@ -870,7 +868,7 @@ mod tests {
     }
 
     fn known(node: &Node) -> BTreeSet<String> {
-        node.state.lock().unwrap().peers.keys().cloned().collect()
+        node.lock_state().peers.keys().cloned().collect()
     }
 
     /// A knows B, B knows C. A must verify C through B's directory, and all
@@ -940,14 +938,14 @@ mod tests {
             tls_pin: None,
         };
         {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             st.peers
                 .insert("pyle-core".into(), record("pyle-core", "127.0.0.1:9001"));
             st.peers
                 .insert("pyle-ext".into(), record("pyle-ext", "127.0.0.1:9002"));
             st.peers.insert("pyle-bad".into(), record("pyle-bad", ""));
             st.sessions.insert(
-                "tok".into(),
+                hdap_core::session_storage_key("tok"),
                 crate::store::Session {
                     user_id: "jose_0123456789abcdef".into(),
                     exp: u64::MAX,
@@ -966,6 +964,7 @@ mod tests {
             query: Default::default(),
             headers,
             body: Vec::new(),
+            peer: None,
         };
         let resp = node.discovery.handle_bubble(&node, &req);
         assert_eq!(resp.status, 200);
@@ -1011,6 +1010,7 @@ mod tests {
             query: BTreeMap::from([("digest".to_string(), digest.clone())]),
             headers: BTreeMap::new(),
             body: Vec::new(),
+            peer: None,
         };
         let resp = a.discovery.handle_directory(&a, &req);
         assert_eq!(resp.status, 200);

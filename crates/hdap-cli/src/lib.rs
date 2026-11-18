@@ -8,11 +8,12 @@ pub mod identity_store;
 
 pub use flow::{
     accept_transfer, authenticate, band_mochthos, band_mochthos_progress, claim_choregia,
-    countersign_band, delete, download, fetch_node_facts, fetch_prices, list_band, list_ktema,
-    proklesis_bits, publish_alias, register, request_transfer, resolve, transfer_inbox,
-    transfer_owner, upload, upload_with_band, AuthResult, BandInfo, FlowError, HttpClient,
-    HttpResponse, KtemaEntry, MatrixEntry, RegisterResult, SyncSnapshot, TimiQuote,
-    TransferAcceptResult, TransferInboxItem, TransferRequestResult, TrustRow,
+    countersign_band, delete, download, fetch_health, fetch_node_facts, fetch_prices, list_band,
+    list_ktema, proklesis_bits, publish_alias, register, request_transfer, resolve,
+    rotate_omphalos, transfer_inbox, transfer_owner, upload, upload_with_band, AuthResult,
+    BandInfo, FlowError, HttpClient, HttpResponse, KtemaEntry, MatrixEntry, OmphalosRotation,
+    RegisterResult, SyncSnapshot, TimiQuote, TransferAcceptResult, TransferInboxItem,
+    TransferRequestResult, TrustRow,
 };
 pub use identity_store::{load, save, IdentityStoreError};
 

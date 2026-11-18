@@ -12,6 +12,7 @@ use chacha20poly1305::{
 use rand_core::{CryptoRng, OsRng, RngCore};
 use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret};
+use zeroize::{Zeroize, Zeroizing};
 
 /// Re-export commonly used Ed25519 types for downstream crates.
 pub use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
@@ -27,10 +28,28 @@ pub enum CryptoError {
 
 pub type CryptoResult<T> = Result<T, CryptoError>;
 
-/// Domain separation constant used when deriving AEAD keys from shared secrets.
+/// Domain separation label for keys derived from session ECDH shared secrets.
 pub const KDF_INFO_SESSION: &[u8] = b"hdap:session";
 /// Domain separation label for the OTP chain root derivation.
 pub const KDF_INFO_OTP: &[u8] = b"hdap:otp";
+/// Domain separation label for keys derived from ECIES shared secrets.
+pub const KDF_INFO_ECIES: &[u8] = b"hdap:ecies";
+
+/// Hard ceiling on OTP chain length. Even if a corrupted database contains a
+/// larger `otp_k`, verification never performs more than this many hashes.
+pub const MAX_OTP_CHAIN_LEN: usize = 4096;
+
+/// HKDF-SHA256 (RFC 5869) extract-and-expand. All X25519 shared secrets must
+/// pass through this function before being used as key material: raw DH output
+/// is not uniformly distributed and must never be used directly.
+pub fn hkdf_sha256(ikm: &[u8], salt: &[u8], info: &[u8]) -> [u8; 32] {
+    use hkdf::Hkdf;
+    let h = Hkdf::<Sha256>::new(Some(salt), ikm);
+    let mut okm = [0u8; 32];
+    h.expand(info, &mut okm)
+        .expect("32 bytes is within HKDF-SHA256's 255*32 output limit");
+    okm
+}
 
 /// SHA-256 digest.
 pub fn sha256(data: &[u8]) -> [u8; 32] {
@@ -91,9 +110,10 @@ pub fn x25519_public(local: &StaticSecret) -> [u8; 32] {
 pub fn seal_to_pub(recipient_pub: &[u8; 32], plaintext: &[u8]) -> Vec<u8> {
     let mut rng = OsRng;
     let eph = x25519_keygen(&mut rng);
-    let shared = x25519_shared(&eph, recipient_pub);
-    let key = Key::from(sha256(&shared));
-    let cipher = ChaCha20Poly1305::new(&key);
+    let mut shared = Zeroizing::new(x25519_shared(&eph, recipient_pub));
+    let key = Zeroizing::new(hkdf_sha256(&shared[..], &[], KDF_INFO_ECIES));
+    shared.zeroize();
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(&key[..]));
     let mut nonce = [0u8; 12];
     rng.fill_bytes(&mut nonce);
     let ct = cipher
@@ -117,9 +137,10 @@ pub fn open_with_priv(local_priv: &StaticSecret, sealed: &[u8]) -> CryptoResult<
         .map_err(|_| CryptoError::DecryptFailed)?;
     let nonce = &sealed[32..44];
     let ct = &sealed[44..];
-    let shared = x25519_shared(local_priv, &eph_pub);
-    let key = Key::from(sha256(&shared));
-    let cipher = ChaCha20Poly1305::new(&key);
+    let mut shared = Zeroizing::new(x25519_shared(local_priv, &eph_pub));
+    let key = Zeroizing::new(hkdf_sha256(&shared[..], &[], KDF_INFO_ECIES));
+    shared.zeroize();
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(&key[..]));
     cipher
         .decrypt(Nonce::from_slice(nonce), ct)
         .map_err(|_| CryptoError::DecryptFailed)
@@ -150,21 +171,54 @@ pub fn aead_open(key: &[u8; 32], sealed: &[u8]) -> CryptoResult<Vec<u8>> {
         .map_err(|_| CryptoError::DecryptFailed)
 }
 
-/// Argon2id params (OWASP-recommended: 19 MiB, t=2, p=1).
-pub const ARGON2_M_COST: u32 = 19 * 1024;
-pub const ARGON2_T_COST: u32 = 2;
-pub const ARGON2_P_COST: u32 = 1;
+/// Argon2id parameters. They are recorded in every v2 vault header so future
+/// increases do not make older vaults unopenable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Argon2Params {
+    /// Memory cost in KiB.
+    pub m_cost: u32,
+    /// Number of passes.
+    pub t_cost: u32,
+    /// Degree of parallelism.
+    pub p_cost: u32,
+}
 
-/// Derive a 32-byte key from a passphrase using Argon2id.
-pub fn derive_key_argon2(password: &[u8], salt: &[u8]) -> [u8; 32] {
-    let params = Params::new(ARGON2_M_COST, ARGON2_T_COST, ARGON2_P_COST, Some(32))
+/// Parameters used by v1 vaults (OWASP minimum: 19 MiB, t=2, p=1). Kept so
+/// legacy vaults can still be opened after a migration.
+pub const ARGON2_PARAMS_V1: Argon2Params = Argon2Params {
+    m_cost: 19 * 1024,
+    t_cost: 2,
+    p_cost: 1,
+};
+
+/// v2 defaults: 64 MiB, t=2, p=1. Stored explicitly in the vault header.
+pub const ARGON2_PARAMS_V2: Argon2Params = Argon2Params {
+    m_cost: 64 * 1024,
+    t_cost: 2,
+    p_cost: 1,
+};
+
+impl Default for Argon2Params {
+    fn default() -> Self {
+        ARGON2_PARAMS_V2
+    }
+}
+
+/// Derive a 32-byte key from a passphrase using explicit Argon2id parameters.
+pub fn derive_key_argon2_with(password: &[u8], salt: &[u8], params: &Argon2Params) -> [u8; 32] {
+    let p = Params::new(params.m_cost, params.t_cost, params.p_cost, Some(32))
         .expect("valid argon2 params");
-    let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, p);
     let mut out = [0u8; 32];
     argon
         .hash_password_into(password, salt, &mut out)
         .expect("argon2id hashing is infallible for valid params");
     out
+}
+
+/// Derive with the current (v2) default parameters.
+pub fn derive_key_argon2(password: &[u8], salt: &[u8]) -> [u8; 32] {
+    derive_key_argon2_with(password, salt, &ARGON2_PARAMS_V2)
 }
 
 /// Derive an OTP chain of length `k` for a seed. Returns `(w_0, chain)`
@@ -196,8 +250,13 @@ pub fn otp_reveal(chain: &[[u8; 32]], r: usize) -> Option<[u8; 32]> {
 }
 
 /// Verify an OTP preimage at step `r` against the published anchor.
-pub fn otp_verify(anchor_hex: &str, r: usize, revealed: &[u8]) -> bool {
-    if r == 0 {
+///
+/// `max_steps` MUST be the chain length registered for that user (never a
+/// client-supplied value). The hard ceiling protects even against a corrupt
+/// database: no caller can make this loop run more than
+/// [`MAX_OTP_CHAIN_LEN`] times.
+pub fn otp_verify_bounded(anchor_hex: &str, r: usize, revealed: &[u8], max_steps: usize) -> bool {
+    if r == 0 || r > max_steps || max_steps > MAX_OTP_CHAIN_LEN {
         return false;
     }
     let anchor = match hex::decode(anchor_hex) {
@@ -211,7 +270,15 @@ pub fn otp_verify(anchor_hex: &str, r: usize, revealed: &[u8]) -> bool {
     for _ in 0..r {
         cur = sha256(&cur);
     }
-    cur.as_slice() == anchor.as_slice()
+    let ok = cur.as_slice() == anchor.as_slice();
+    cur.zeroize();
+    ok
+}
+
+/// Verify against the global ceiling when the registered chain length is not
+/// available. Prefer [`otp_verify_bounded`] on any authenticated path.
+pub fn otp_verify(anchor_hex: &str, r: usize, revealed: &[u8]) -> bool {
+    otp_verify_bounded(anchor_hex, r, revealed, MAX_OTP_CHAIN_LEN)
 }
 
 #[cfg(test)]

@@ -115,7 +115,7 @@ impl TransferModule {
         }
 
         let (old_nickname, old_pub) = {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             let Some(user) = st.users.get(old_owner) else {
                 return Response::json(404, json_err("old owner not registered"));
             };
@@ -156,7 +156,7 @@ impl TransferModule {
             .to_string();
         if new_pyle == self.cfg.server_id {
             if new_pubkey.is_empty() {
-                let st = node.state.lock().unwrap();
+                let st = node.lock_state();
                 new_pubkey = st
                     .users
                     .get(&new_owner)
@@ -294,7 +294,7 @@ impl TransferModule {
             return Response::json(401, json_err("request signature invalid"));
         }
         let old_user_pub = {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             st.users
                 .get(old_owner)
                 .and_then(|u| u.sign_pub_bytes())
@@ -314,7 +314,7 @@ impl TransferModule {
             }
             let provided_hash = content_hash(text.as_bytes());
             let existing = {
-                let st = node.state.lock().unwrap();
+                let st = node.lock_state();
                 st.transfers.get(&request.request_id).cloned()
             };
             let Some(existing) = existing else {
@@ -365,7 +365,7 @@ impl TransferModule {
         let record = record_from_request(&request, final_text.clone(), request_hash.clone());
 
         let duplicate = {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             st.transfers.get(&request.request_id).cloned()
         };
         if let Some(existing) = duplicate {
@@ -402,7 +402,7 @@ impl TransferModule {
             );
         }
         {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             st.transfers.insert(request.request_id.clone(), record);
             if request.new_pyle == self.cfg.server_id {
                 // Same pyle: the recipient is local, so the inbox is right here.
@@ -469,7 +469,7 @@ impl TransferModule {
             return Response::json(401, json_err("request signatures invalid"));
         }
         let registered_pub = {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             st.users
                 .get(&request.new_owner)
                 .and_then(|u| u.sign_pub_bytes())
@@ -482,7 +482,7 @@ impl TransferModule {
             return Response::json(409, json_err("request names a different recipient key"));
         }
         let hash = content_hash(text.as_bytes());
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         if let Some(existing) = st.transfers.get(&request.request_id) {
             if existing.request_hash == hash {
                 return Response::json(200, json_err("already delivered"));
@@ -510,7 +510,7 @@ impl TransferModule {
         let Some(user) = node.session_user(req) else {
             return Response::json(401, json_err("unauthorized"));
         };
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         let items: Vec<serde_json::Value> = st
             .transfers
             .values()
@@ -554,7 +554,7 @@ impl TransferModule {
     }
 
     fn accept_draft(&self, node: &crate::node::Node, user: &str, request_id: &str) -> Response {
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         let Some(record) = st.transfers.get(request_id) else {
             return Response::json(404, json_err("request not found"));
         };
@@ -622,7 +622,7 @@ impl TransferModule {
             None => return Response::json(400, json_err("embedded request is not a request")),
         };
         let record = {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             st.transfers.get(&request.request_id).cloned()
         };
         let Some(mut record) = record else {
@@ -664,7 +664,7 @@ impl TransferModule {
         let final_text = final_doc.render();
         let accept_hash = content_hash(final_text.as_bytes());
         {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             if let Some(r) = st.transfers.get_mut(&request.request_id) {
                 r.status = "accepted".into();
                 r.accept_doc = Some(final_text.clone());
@@ -694,7 +694,7 @@ impl TransferModule {
 
         match self.forward_to_source(node, &record, &final_text) {
             Ok((status, record_path)) => {
-                let mut st = node.state.lock().unwrap();
+                let mut st = node.lock_state();
                 if let Some(r) = st.transfers.get_mut(&request.request_id) {
                     r.status = status.clone();
                     r.record_path = Some(record_path.clone());
@@ -766,7 +766,7 @@ impl TransferModule {
             return Response::json(401, json_err("acceptance signatures invalid"));
         }
         let existing = {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             st.transfers.get(&request.request_id).cloned()
         };
         let Some(mut record) = existing else {
@@ -792,7 +792,7 @@ impl TransferModule {
         // able to rewrite something the cessionário has already accepted.
         lock_cessions(node, &record);
         {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             if let Some(r) = st.transfers.get_mut(&request.request_id) {
                 r.status = "accepted".into();
                 r.accept_doc = Some(accept_text.to_string());
@@ -822,7 +822,7 @@ impl TransferModule {
                 }
             }
         };
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         if let Some(r) = st.transfers.get_mut(&request.request_id) {
             r.status = status.clone();
             r.record_path = Some(record_path.clone());
@@ -898,7 +898,7 @@ impl TransferModule {
             return Response::json(401, json_err("acceptance signatures invalid"));
         }
         let Some(record) = ({
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             st.transfers.get(&request.request_id).cloned()
         }) else {
             return Response::json(404, json_err("transfer request not in this inbox"));
@@ -930,7 +930,7 @@ impl TransferModule {
             }
             plain_by_dest.insert(asset.dest.clone(), data);
         }
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         let total: u64 = plain_by_dest.values().map(|v| v.len() as u64).sum();
         let used = st.stored.get(&record.new_owner).copied().unwrap_or(0);
         if self.cfg.moira_bytes > 0 && used + total > self.cfg.moira_bytes {
@@ -985,7 +985,7 @@ impl TransferModule {
         node: &crate::node::Node,
         record: &TransferRecord,
     ) -> Result<(String, String), Response> {
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         let total: u64 = record.assets.iter().map(|a| a.size).sum();
         let used = st.stored.get(&record.new_owner).copied().unwrap_or(0);
         if self.cfg.moira_bytes > 0 && used + total > self.cfg.moira_bytes {
@@ -1107,7 +1107,7 @@ impl TransferModule {
         let client = FedHttpClient::new(&endpoint, pin).map_err(|e| e.to_string())?;
         let mut blobs = Vec::with_capacity(record.assets.len());
         {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             for asset in &record.assets {
                 let key = State::key(&record.old_owner, &asset.source);
                 let Some(blob) = st.objects.get(&key) else {
@@ -1237,7 +1237,7 @@ impl TransferModule {
         target_kind: &str,
         targets: &[String],
     ) -> Result<Vec<TransferAsset>, Response> {
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         if st.ceessions.get(old_owner).is_some_and(|c| !c.is_empty())
             && target_kind == TRANSFER_TARGET_IDENTITY
         {
@@ -1324,7 +1324,7 @@ impl TransferModule {
             );
         }
         let record = {
-            let st = node.state.lock().unwrap();
+            let st = node.lock_state();
             st.transfers.get(request_id).cloned()
         };
         let Some(record) = record else {
@@ -1365,7 +1365,7 @@ fn node_now(node: &crate::node::Node) -> u64 {
 }
 
 fn node_node_sign_pub(node: &crate::node::Node) -> String {
-    let seed = node.state.lock().unwrap().node_sign_seed;
+    let seed = node.lock_state().node_sign_seed;
     hex::encode(SigningKey::from_bytes(&seed).verifying_key().to_bytes())
 }
 
@@ -1435,7 +1435,7 @@ fn verify_manifest(
     old_owner: &str,
     request: &TransferRequestDoc,
 ) -> bool {
-    let st = node.state.lock().unwrap();
+    let st = node.lock_state();
     for asset in &request.targets {
         let Some(blob) = st.objects.get(&State::key(old_owner, &asset.source)) else {
             return false;
@@ -1460,7 +1460,7 @@ fn in_scope(path: &str, scope: &str) -> bool {
 }
 
 fn append_node_signature(node: &crate::node::Node, doc: &mut Doc) -> bool {
-    let seed = node.state.lock().unwrap().node_sign_seed;
+    let seed = node.lock_state().node_sign_seed;
     let key = SigningKey::from_bytes(&seed);
     let idx = doc.sigs.len();
     doc.sigs.push(Signature {
@@ -1513,7 +1513,7 @@ fn lock_cessions(node: &crate::node::Node, record: &TransferRecord) {
     } else {
         record.scopes.clone()
     };
-    let mut st = node.state.lock().unwrap();
+    let mut st = node.lock_state();
     for scope in scopes {
         let list = st.ceessions.entry(record.old_owner.clone()).or_default();
         if !list
@@ -1635,7 +1635,7 @@ pub(crate) fn release_after_delete(
     hash: &str,
 ) -> usize {
     let record = {
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         st.transfers
             .values()
             .rev()
@@ -1670,7 +1670,7 @@ pub(crate) fn release_after_delete(
 /// (or its notification) remains the authority for every other pyle.
 fn drop_local_replica(node: &crate::node::Node, owner: &str, source: &str, hash: &str) -> bool {
     let key = State::key(owner, source);
-    let mut st = node.state.lock().unwrap();
+    let mut st = node.lock_state();
     let Some(blob) = st.objects.get(&key) else {
         return false;
     };
@@ -1695,7 +1695,7 @@ fn drop_local_replica(node: &crate::node::Node, owner: &str, source: &str, hash:
 
 fn send_release(node: &crate::node::Node, record: &TransferRecord, dest: &str) -> usize {
     let (endpoint, recorded_pin, node_id, sign_key) = {
-        let st = node.state.lock().unwrap();
+        let st = node.lock_state();
         // Prefer the live peer record: a handshake updates its pin, whereas
         // the pin captured in an older transfer record can be stale. Fall
         // back to the record/id when the peer is not in the bubble anymore.
@@ -1765,7 +1765,7 @@ pub(crate) fn release_local(
     let now = node.now();
     let mut removed: Vec<(String, String, String)> = Vec::new();
     {
-        let mut st = node.state.lock().unwrap();
+        let mut st = node.lock_state();
         for dest in dests {
             let Some(asset) = record.assets.iter().find(|a| a.dest == *dest) else {
                 continue;
@@ -1929,7 +1929,7 @@ mod release_tests {
         let data = b"blog";
         let hash = sha256_hex(data);
         {
-            let mut st = node.state.lock().unwrap();
+            let mut st = node.lock_state();
             st.transfers.insert("req-1".into(), record(old, new, &hash));
             let master = st.master_key;
             for (owner, path) in [(old, "docs/r.txt"), (new, "docs/r.txt")] {
