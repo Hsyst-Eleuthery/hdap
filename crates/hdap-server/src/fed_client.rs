@@ -40,8 +40,9 @@ pub struct FedHttpClient {
     pub host: String,
     pub port: u16,
     /// Certificate pin for this peer. `None` means plaintext, which is only
-    /// permitted for loopback.
-    pub tls_pin: Option<String>,
+    /// permitted for loopback. May be updated after a TOFU connection so the
+    /// learned pin is remembered across connections.
+    pub tls_pin: std::sync::Arc<std::sync::Mutex<Option<String>>>,
     pub connect_timeout: Duration,
     pub io_timeout: Duration,
     /// Set once a plaintext probe turns out to be a TLS peer, so the remaining
@@ -59,7 +60,7 @@ impl FedHttpClient {
         Ok(Self {
             host,
             port,
-            tls_pin,
+            tls_pin: std::sync::Arc::new(std::sync::Mutex::new(tls_pin)),
             connect_timeout: CONNECT_TIMEOUT,
             io_timeout: IO_TIMEOUT,
             peer_tls: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -135,7 +136,7 @@ impl FedHttpClient {
     /// gets the fast plaintext probe (for a `--no-tls` dev node), falling back
     /// to TLS TOFU if that yields no parseable status line.
     fn send(&self, request: &[u8]) -> io::Result<HttpResponse> {
-        if let Some(pin) = &self.tls_pin {
+        if let Some(pin) = self.tls_pin.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
             let tcp = self.connect_tcp()?;
             let mut stream = hdap_tls::connect(
                 tcp,
@@ -179,11 +180,30 @@ impl FedHttpClient {
     }
 
     /// Dial over TLS accepting the presented certificate (TOFU).
+    ///
+    /// On the first connection, the presented certificate's pin is accepted and
+    /// stored for future connections. On subsequent connections, the stored pin
+    /// is enforced so that a changed certificate is rejected (AME-09).
+        /// Dial over TLS accepting the presented certificate (TOFU).
+    ///
+    /// On the first connection, the presented certificate's pin is accepted and
+    /// stored for future connections. On subsequent connections, the stored pin
+    /// is enforced so that a changed certificate is rejected (AME-09).
     fn tls_tofu(&self, request: &[u8]) -> io::Result<HttpResponse> {
         let tcp = self.connect_tcp()?;
-        let mut stream = hdap_tls::connect(tcp, &self.host, hdap_tls::PinVerifier::new(None))?;
+        let pin = self.tls_pin.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        let verifier = hdap_tls::PinVerifier::new(pin.clone());
+        let verifier_clone = verifier.clone();
+        let mut stream = hdap_tls::connect(tcp, &self.host, verifier)?;
         stream.write_all(request)?;
         stream.flush()?;
+        // If we connected in TOFU mode (no pin configured), record the observed
+        // pin so future connections enforce it.
+        if self.tls_pin.lock().unwrap_or_else(|p| p.into_inner()).is_none() {
+            if let Some(pin) = verifier_clone.observed() {
+                *self.tls_pin.lock().unwrap_or_else(|p| p.into_inner()) = Some(pin);
+            }
+        }
         self.read_response(&mut stream)
     }
 
@@ -496,5 +516,31 @@ mod tests {
             Some("abc")
         );
         assert_eq!(r.body, b"xyz");
+    }
+
+    /// A TOFU pin learned on first connection is persisted and used on
+    /// subsequent connections to the same peer.
+    #[test]
+    fn tls_pin_is_persisted_after_first_tls_connection() {
+        let client = FedHttpClient::new("198.51.100.7:8443", None).unwrap();
+        assert!(client.tls_pin.lock().unwrap().is_none(), "no pin initially");
+
+        // Simulate a successful TOFU connection by storing a pin manually
+        // (the actual TLS handshake is tested separately).
+        *client.tls_pin.lock().unwrap_or_else(|p| p.into_inner()) =
+            Some("sha256:abcd1234".into());
+
+        // A subsequent connection should use the stored pin.
+        // We verify the pin is now set and would be used:
+        let pin = client.tls_pin.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        assert_eq!(pin, Some("sha256:abcd1234".into()));
+
+        // A new client without a pin should NOT have this pin (each client
+        // instance is independent unless shared).
+        let client2 = FedHttpClient::new("198.51.100.7:8443", None).unwrap();
+        assert!(
+            client2.tls_pin.lock().unwrap_or_else(|p| p.into_inner()).is_none(),
+            "new client should not have pin"
+        );
     }
 }

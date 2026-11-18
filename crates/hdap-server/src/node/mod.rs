@@ -259,9 +259,10 @@ impl Node {
         // disk. The fingerprint inside `flush` makes a no-op POST cheap, so
         // this stays correct even for read-only POSTs (proklesis, etc.).
         // AME-XX: nonce consumption (factor-1 challenge) must also persist even
-        // when the triggering request is a GET (e.g. /resolve_hash).
+        // when the triggering request is a GET (e.g. /resolve_hash) and even
+        // when the response is not 2xx (e.g. factor-1 rejected with 401).
         let should_flush = mutating || self.nonce_consumed.load(Ordering::Relaxed);
-        if should_flush && self.db.is_some() && (200..300).contains(&resp.status) {
+        if should_flush && self.db.is_some() {
             if let Err(e) = self.persist() {
                 return Response::json(500, json_err(&format!("persist failed: {e}")));
             }

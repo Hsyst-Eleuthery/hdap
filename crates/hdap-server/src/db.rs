@@ -35,11 +35,13 @@
 //! rather than a half-applied one.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use rusqlite::{params, Connection, OptionalExtension};
 
+use hdap_core::crypto::sha256_hex;
 use crate::store::{
     Cession, MirrorOrigin, PeerRecord, ProklesisRecord, PrytaneionEntry, Session, State, UserRecord,
 };
@@ -466,9 +468,9 @@ impl Db {
                 // to the BLOB for databases created before this change.
                 let data = if !self.blob_dir.as_os_str().is_empty() {
                     let path = self.blob_dir.join(&hash);
-                    match std::fs::read(&path) {
-                        Ok(file_bytes) => file_bytes,
-                        Err(_) => row.get::<_, Vec<u8>>(3)?,
+                    match self.read_blob_from_disk(&path, &hash, len as u64) {
+                        Some(data) => data,
+                        None => row.get::<_, Vec<u8>>(3)?,
                     }
                 } else {
                     row.get::<_, Vec<u8>>(3)?
@@ -555,7 +557,20 @@ impl Db {
             let _ = std::fs::create_dir_all(&self.blob_dir);
             for (_, b) in &blob_writes {
                 let path = self.blob_dir.join(&b.hash);
-                let _ = std::fs::write(&path, &b.bytes);
+                // Write to temp file first, fsync, then atomic rename so we
+                // never leave a partial or corrupt blob on disk.
+                let tmp_path = self.blob_dir.join(format!(".{}.tmp", b.hash));
+                let mut tmp_file = std::fs::File::create(&tmp_path)
+                    .map_err(|e| DbError::Corrupt(format!("cannot write blob temp file: {e}")))?;
+                tmp_file.write_all(&b.bytes).map_err(|e| {
+                    DbError::Corrupt(format!("cannot write blob temp file: {e}"))
+                })?;
+                tmp_file.sync_all().map_err(|e| {
+                    DbError::Corrupt(format!("cannot sync blob temp file: {e}"))
+                })?;
+                std::fs::rename(&tmp_path, &path).map_err(|e| {
+                    DbError::Corrupt(format!("cannot rename blob temp file: {e}"))
+                })?;
             }
             // Remove on-disk copies of deleted blobs (best effort). The hash
             // is still in `blob_marks` until we clear it below.
@@ -582,6 +597,27 @@ impl Db {
             blob_marks.remove(&k);
         }
         Ok(())
+    }
+
+    /// Read a blob from disk, validating that its hash and length match.
+    /// Returns None if the file is missing, corrupt, or doesn't match,
+    /// so the caller can fall back to the SQLite BLOB.
+    fn read_blob_from_disk(
+        &self,
+        path: &std::path::Path,
+        expected_hash: &str,
+        expected_len: u64,
+    ) -> Option<Vec<u8>> {
+        let data = std::fs::read(path).ok()?;
+        if data.len() as u64 != expected_len {
+            return None;
+        }
+        // Verify hash matches
+        let actual_hash = sha256_hex(&data);
+        if actual_hash != expected_hash {
+            return None;
+        }
+        Some(data)
     }
 
     /// Bytes on disk (blobs + metadata + on-disk blob files), for `/health`
