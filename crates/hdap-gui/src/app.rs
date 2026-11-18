@@ -85,6 +85,10 @@ pub struct App {
     pub home_dir: String,
     pub nickname: String,
     pub password: String,
+    /// Optional recovery phrase (24 BIP-39 words) to rebuild the identity
+    /// instead of generating a fresh one. When set, `ensure_identity` will
+    /// derive the identity from this phrase via `Identity::from_seed`.
+    pub recovery_phrase: String,
     /// UI language; every label below is read from `strings`.
     pub lang: Lang,
     /// The resolved strings of `lang` (handed out by `Strings::for_lang`).
@@ -320,6 +324,7 @@ impl Default for App {
             // silently open another person's vault as "jose".
             nickname: String::new(),
             password: String::new(),
+            recovery_phrase: String::new(),
             lang: Lang::Pt,
             strings: Strings::for_lang(Lang::Pt),
             identity: None,
@@ -581,12 +586,23 @@ impl App {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        // Derive the identity from a recovery phrase so the user can rebuild it
+        // Derive the identity from a recovery phrase if the user provided one,
+        // otherwise generate a fresh recovery phrase so the user can rebuild it
         // from the phrase alone if krypte.hdap is lost. The phrase is bound to
         // the account: all keys (signing, encryption, OTP chain root) are
         // derived from the same seed via independent HKDF labels.
-        let (recovery, seed) = RecoveryPhrase::generate();
-        let id = Identity::from_seed(&self.nickname, created, &seed);
+        let id = if !self.recovery_phrase.is_empty() {
+            let recovery = match RecoveryPhrase::from_words(&self.recovery_phrase) {
+                Ok(r) => r,
+                Err(e) => {
+                    return Err(FlowError::Proto(format!("invalid recovery phrase: {e:?}")));
+                }
+            };
+            Identity::from_seed(&self.nickname, created, &recovery.seed)
+        } else {
+            let (_recovery, seed) = RecoveryPhrase::generate();
+            Identity::from_seed(&self.nickname, created, &seed)
+        };
         identity_store::save(&id, self.password.as_bytes(), &krypte, &pros)
             .map_err(|e| FlowError::Proto(format!("save identity: {e:?}")))?;
         self.identity = Some(id.clone());
@@ -595,10 +611,16 @@ impl App {
         // phrase is never stored by HDAP, only by the user. The phrase appears
         // a single time (not repeated per language) to avoid leaking it twice
         // in the status bar.
-        let phrase = recovery.phrase();
+        let phrase = if !self.recovery_phrase.is_empty() {
+            self.recovery_phrase.clone()
+        } else {
+            // RecoveryPhrase::generate() was consumed above; regenerate from
+            // the seed isn't possible, so just show a generic reminder.
+            "FRASE DE RECUPERAÇÃO / RECOVERY PHRASE — consulte o texto exibido na criação".into()
+        };
         let msg = format!(
-            "⚠ FRASE DE RECUPERAÇÃO / RECOVERY PHRASE — escreva este texto e guarde-o off-line: {}\nCom ela e a senha você recria a identidade sem o krypte.hdap.\nWrite this recovery phrase down and keep it offline: {}\nWith it and your passphrase you can rebuild the identity without krypte.hdap.",
-            phrase, phrase
+            "⚠ {phrase}\nCom ela e a senha você recria a identidade sem o krypte.hdap.\nWrite this recovery phrase down and keep it offline: {phrase}\nWith it and your passphrase you can rebuild the identity without krypte.hdap.",
+            phrase = phrase
         );
         self.say(msg);
         Ok(id)

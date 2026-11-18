@@ -89,7 +89,7 @@ The pyle id is derived from the announced address; the pin is the SHA-256 of the
 
 ## Verification
 
-The suite has **261 automated tests** covering core, server, CLI, TLS and the GUI, including F3 bound to the challenge, OTP limits, v1/v2 vaults, hashed sessions, external master key, signed OMPHALOS rotation and Ángelma/UTC display. CI enforces `cargo fmt --check` and `cargo clippy -D warnings`.
+The suite has **267 automated tests** covering core, server, CLI, TLS and the GUI, including F3 bound to the challenge, OTP limits, v1/v2 vaults, hashed sessions, external master key, signed OMPHALOS rotation and Ángelma/UTC display. CI enforces `cargo fmt --check` and `cargo clippy -D warnings`.
 
 Honest limits: there is no central password recovery; metadata is public by design; deletion is incentive-based, not physical enforcement; federation is open with first-contact key pinning; and the session token is deterministic for `(K, server_id, exp)` — two logins in the same second may produce the same value. A signature proves that a key signed those bytes, **not** that the signer created the content: copying a public file and signing it is possible. The ledger records who signed and submitted first (`origin_user`) separately from the namespace owner (`namespace_owner`). See [SECURITY.md](SECURITY.md) and [docs/modelo-de-ameaca.md](docs/modelo-de-ameaca.md).
 

@@ -439,6 +439,14 @@ pub struct Strings {
     pub add_line: &'static str,
     pub add_replica: &'static str,
     pub add_deletion: &'static str,
+    /// recovery
+    pub recover_title: &'static str,
+    pub recover_phrase_label: &'static str,
+    pub recover_phrase_hint: &'static str,
+    pub recover_btn: &'static str,
+    pub recover_success: &'static str,
+    pub recover_fail: &'static str,
+    pub recover_note: &'static str,
 }
 
 /// Build a `Strings` bag from the embedded JSON of a language.
@@ -787,6 +795,13 @@ fn load(lang: Lang) -> Strings {
         add_line: get("add_line"),
         add_replica: get("add_replica"),
         add_deletion: get("add_deletion"),
+        recover_title: get("recover_title"),
+        recover_phrase_label: get("recover_phrase_label"),
+        recover_phrase_hint: get("recover_phrase_hint"),
+        recover_btn: get("recover_btn"),
+        recover_success: get("recover_success"),
+        recover_fail: get("recover_fail"),
+        recover_note: get("recover_note"),
     }
 }
 

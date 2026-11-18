@@ -382,6 +382,12 @@ fn render_wizard(ui: &mut egui::Ui, app: &mut App) {
                         app.strings.label_pass,
                         egui::TextEdit::singleline(&mut app.password).password(true),
                     );
+                    field_row(
+                        ui,
+                        app.strings.recover_phrase_label,
+                        egui::TextEdit::singleline(&mut app.recovery_phrase)
+                            .hint_text(app.strings.recover_phrase_hint),
+                    );
                     ui.horizontal(|ui| {
                         ui.add_sized(
                             [76.0, 20.0],

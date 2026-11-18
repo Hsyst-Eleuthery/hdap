@@ -330,5 +330,12 @@
   "h_origin_user": "ningún usuario de origen aún",
   "h_status": "mirror | canonical | archived",
   "h_replica": "pyle@user:n",
-  "h_deletion": "poeira@blob:hash"
+  "h_deletion": "poeira@blob:hash",
+  "recover_title": "Recuperar identidad",
+  "recover_phrase_label": "Frase de recuperación",
+  "recover_phrase_hint": "24 palabras BIP-39",
+  "recover_btn": "Recuperar",
+  "recover_success": "Identidad recuperada",
+  "recover_fail": "Error al recuperar",
+  "recover_note": "Sin esta frase, no hay recuperación."
 }

@@ -330,5 +330,12 @@
   "h_origin_user": "no origin user yet",
   "h_status": "mirror | canonical | archived",
   "h_replica": "pyle@user:n",
-  "h_deletion": "dust@blob:hash"
+  "h_deletion": "dust@blob:hash",
+  "recover_title": "Recover identity",
+  "recover_phrase_label": "Recovery phrase",
+  "recover_phrase_hint": "24 BIP-39 words",
+  "recover_btn": "Recover",
+  "recover_success": "Identity recovered",
+  "recover_fail": "Recovery failed",
+  "recover_note": "Without this phrase, no recovery."
 }

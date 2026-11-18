@@ -337,10 +337,16 @@ fn cmd_auth(args: &CmdArgs) {
                         step = next as usize;
                         continue;
                     }
-                    _ => panic!("auth failed: {body}"),
+                    _ => {
+                        eprintln!("auth failed: {body}");
+                        std::process::exit(1);
+                    }
                 }
             }
-            Err(e) => panic!("auth failed: {e}"),
+            Err(e) => {
+                eprintln!("auth failed: {e}");
+                std::process::exit(1);
+            }
         }
     };
     // The chain moved one step past the one we just proved.
@@ -671,5 +677,95 @@ mod tests {
         let (args, rest) = parse(&["--no", "x"]);
         assert_eq!(args.port, 8443);
         assert_eq!(rest, vec!["--no", "x"]);
+    }
+
+    /// End-to-end recovery flow against a real in-process server:
+    /// create identity from a recovery phrase → register → login → delete
+    /// the vault → recover from the phrase → login again.
+    #[test]
+    fn recovery_phrase_full_flow_against_server() {
+        use hdap_cli::flow::{authenticate, register};
+        use hdap_cli::http_client::HttpClient;
+        use hdap_core::identity::Identity;
+        use hdap_core::vault::{Vault, VaultSecrets};
+        use hdap_core::RecoveryPhrase;
+        use hdap_server::http;
+        use hdap_server::Node;
+        use hdap_tls;
+        use std::net::TcpListener;
+        use std::sync::Arc;
+        use std::thread;
+
+        // Self-signed TLS node identity (AME-09); the client pins its cert.
+        let tls_identity = hdap_tls::self_signed("node-a", &["127.0.0.1", "localhost"]).unwrap();
+        let pin = tls_identity.pin();
+        let tls = tls_identity.server_config().unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let cfg = hdap_server::Config {
+            server_id: "node-a".to_string(),
+            choregia_per_mochthos: 1024,
+            pow: hdap_core::pow::PowPolicy::new(4, 1, 6),
+            require_entry_pow: false,
+            require_content_signature: false,
+            rate_limit_per_sec: 0,
+            ..hdap_server::Config::default()
+        };
+        let mut node = Node::new(cfg);
+        node.tls_pin = Some(pin.clone());
+        let node_ref = Arc::new(node);
+        let handle = Arc::clone(&node_ref);
+        thread::spawn(move || {
+            let _ = http::serve_tls(listener, 10 * 1024 * 1024, tls, move |req| {
+                handle.handle(&req)
+            });
+        });
+        let client = HttpClient::new_tls("127.0.0.1", port, pin.clone());
+
+        let tmp = std::env::temp_dir().join(format!("hdap-e2e-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let krypte = tmp.join("krypte.hdap");
+        let pros = tmp.join("prosopeion.hdap");
+
+        // 1. Create identity from a recovery phrase.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let (recovery, seed) = RecoveryPhrase::generate();
+        let id = Identity::from_seed("recover_test", now, &seed);
+        let words = recovery.words_only();
+
+        // 2. Save vault + prosopeion to disk.
+        identity_store::save(&id, b"passphrase", &krypte, &pros).unwrap();
+
+        // 3. Register on the server.
+        let reg = register(&client, &id).unwrap();
+        assert!(!reg.user_id.is_empty());
+
+        // 4. Login (first login uses OTP step 1).
+        let auth = authenticate(&client, &id, &reg.user_id, 1).unwrap();
+        assert!(!auth.token.is_empty());
+
+        // 5. Simulate loss of the vault: delete krypte.hdap.
+        std::fs::remove_file(&krypte).unwrap();
+
+        // 6. Recover identity from the recovery phrase.
+        let recovered = RecoveryPhrase::from_words(&words).unwrap();
+        let recovered_id = Identity::from_seed("recover_test", now, &recovered.seed);
+        let secrets = VaultSecrets {
+            seed: recovered_id.seed(),
+            sign_secret: recovered_id.sign_key.to_bytes(),
+            enc_secret: recovered_id.enc_secret.to_bytes(),
+            recovery_root: recovered_id.recovery_root,
+        };
+        let vault = Vault::seal(&secrets, b"passphrase");
+        std::fs::write(&krypte, vault.to_bytes()).unwrap();
+
+        // 7. Login again with the recovered identity. Step 2 because step 1
+        // was already consumed by the first login.
+        let auth2 = authenticate(&client, &recovered_id, &reg.user_id, 2).unwrap();
+        assert!(!auth2.token.is_empty());
     }
 }

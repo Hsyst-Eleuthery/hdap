@@ -44,7 +44,7 @@ Geração **Téleia vási**. Codinome de protocolo: **Teleios**. Codinome de lan
 ### Compatibilidade e qualidade
 
 - Cofre local versionado: cabeçalho `HDAPVAULT\0\x02` com parâmetros Argon2 no cabeçalho (padrão 64 MiB/t=2/p=1); cofres v1 (19 MiB/t=2/p=1) continuam legíveis. Limites de sanidade impedem parâmetros absurdos em cofres v2.
-- 261 testes automatizados; novos testes cobrem rotação assinada na CLI e na GUI, F3 vinculado, cofre v1/v2, chave externa, sessões hashadas e exibição da Ángelma.
+- 267 testes automatizados; novos testes cobrem rotação assinada na CLI e na GUI, F3 vinculado, cofre v1/v2, chave externa, sessões hashadas e exibição da Ángelma.
 
 ### Documentação
 
