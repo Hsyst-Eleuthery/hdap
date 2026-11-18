@@ -1,6 +1,6 @@
 # Documentação do HDAP
 
-*Revisão de 2026-11-17.*
+*Revisão de 2026-11-18.*
 
 Este diretório reúne a documentação pública do **Hsyst Descentralized Archive Protocol**, na versão **v2.0**, geração **Téleia vási** com codinome de protocolo **Teleios** e codinome de lançamento **Teleios**. Comece pela [visão da geração v2](VERSAO.md) para entender o que mudou em relação ao Themelio. A documentação foi escrita para ser lida em texto corrido, com links entre os capítulos, e para servir tanto a quem quer usar o sistema quanto a quem quer operá-lo, implementá-lo ou auditá-lo.
 
@@ -22,7 +22,7 @@ A documentação usa a transliteração grega em minúsculas para os nomes de pr
 
 ## Versionamento da documentação
 
-Toda release atualiza a documentação. A política de codinomes, as regras de bump e a tabela histórica estão em [VERSAO.md](VERSAO.md); o histórico ponto a ponto está no [CHANGELOG](../CHANGELOG.md). O formato dos documentos segue em `# VERSION: 1`, independente da geração.
+Toda release atualiza a documentação. A política de codinomes, as regras de bump e a tabela histórica estão em [VERSAO.md](VERSAO.md); o histórico ponto a ponto está no [CHANGELOG](../CHANGELOG.md), e as [notas da release v2.0.0](release-notes-v2.0.0.md) resumem esta publicação para quem vai baixar ou verificar os pacotes. O formato dos documentos segue em `# VERSION: 1`, independente da geração.
 
 ## Documentos
 

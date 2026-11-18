@@ -1,6 +1,6 @@
 # Histórico
 
-*Revisão de 2026-11-17.*
+*Revisão de 2026-11-18.*
 
 O HDAP usa um codinome de protocolo e um de lançamento por release; a política completa está em [docs/VERSAO.md](docs/VERSAO.md). A geração atual é **Téleia vási · Teleios**.
 
@@ -83,6 +83,12 @@ Geração **Téleia vási**. Codinome de protocolo: **Teleios**. Codinome de lan
 - **Ressalva final da auditoria fechada:** duas conexões que iniciam o handshake TLS antes de existir pin podiam aceitar certificados diferentes. O código já evitava sobrescrever o primeiro pin, mas ainda enviava a requisição HTTP pela conexão divergente. A reconciliação foi extraída para `reconcile_tofu_pin()`: após o handshake e **antes** de `stream.write_all(request)`, o fingerprint observado é comparado com o pin armazenado sob o mutex. Se divergirem, a conexão é rejeitada com `InvalidData` (`HDAP TOFU: peer certificate changed during first contact`) e nenhum byte da requisição é enviado.
 - **Teste dedicado:** `concurrent_first_contact_rejects_a_divergent_certificate` cobre o caso determinístico (pin já registrado) e a concorrência real com `Barrier`, garantindo que exatamente um dos dois primeiros contatos vence e que o pin do primeiro nunca é sobrescrito.
 - **Consolidação encerrada:** suíte completa novamente verde com **270 testes aprovados**, nenhuma falha.
+
+### Publicação v2.0.0 (2026-11-18)
+
+- **Tag e Release:** a geração Teleios sai como `v2.0.0`, com pacotes para `x86_64-unknown-linux-gnu`, `x86_64-unknown-linux-musl` e `x86_64-pc-windows-gnu`. As [notas da release](docs/release-notes-v2.0.0.md) reúnem mudanças, compatibilidade, downloads e verificação; o workflow de CI anexa os artefatos e os checksums à Release ao publicar a tag.
+- **Auditoria de dependências limpa:** `rusqlite` subiu para `0.41.1` e `libsqlite3-sys` para `0.39.1`, eliminando o CVE do SQLite embutido (RUSTSEC-2026-0459). `cargo audit` passa sem vulnerabilidades; restam apenas avisos informativos de crates `unmaintained`/`yanked`.
+- **Documentação de release:** README (PT/EN), índice de `docs/`, guia de execução e este changelog passam a apontar para as notas publicadas, com a data de revisão atualizada.
 
 ## v1.001 — 2026-10-29
 

@@ -2,7 +2,7 @@
 
 > **Arquivos com autoria. Memória com prova. Uma casa que não depende de um único servidor.**
 
-*Revisão de 2026-11-17 · v2.0.0 (Téleia vási · Teleios).*
+*Revisão de 2026-11-18 · v2.0.0 (Téleia vási · Teleios).*
 
 ## Tradução rápida
 
@@ -113,7 +113,7 @@ A confiança não é uma promessa: é uma sequência de provas que qualquer clie
 
 ### Baixar uma versão pronta
 
-Os pacotes de cada sistema ficam em **[Releases](https://github.com/Hsyst-Eleuthery/hdap/releases)**. A release **v2.0 (Teleios)** é empacotada como `2.0.0`. Para Linux x86_64 com biblioteca estática, baixe `hdap-2.0.0-x86_64-unknown-linux-musl.tar.gz`, que é a opção mais portátil e não depende da glibc do sistema. Para Linux x86_64 com glibc, baixe `hdap-2.0.0-x86_64-unknown-linux-gnu.tar.gz`. Para Windows x86_64, baixe `hdap-2.0.0-x86_64-pc-windows-gnu.zip`. Cada pacote inclui `hdap-server`, `hdap-gui` e `hdap-cli` — com a extensão `.exe` no Windows — e um checksum SHA-256. Confira o checksum antes de executar qualquer binário.
+Os pacotes de cada sistema ficam em **[Releases](https://github.com/Hsyst-Eleuthery/hdap/releases)**. A release **v2.0 (Teleios)** é empacotada como `2.0.0`. Para Linux x86_64 com biblioteca estática, baixe `hdap-2.0.0-x86_64-unknown-linux-musl.tar.gz`, que é a opção mais portátil e não depende da glibc do sistema. Para Linux x86_64 com glibc, baixe `hdap-2.0.0-x86_64-unknown-linux-gnu.tar.gz`. Para Windows x86_64, baixe `hdap-2.0.0-x86_64-pc-windows-gnu.zip`. Cada pacote inclui `hdap-server`, `hdap-gui` e `hdap-cli` — com a extensão `.exe` no Windows — e um checksum SHA-256. Confira o checksum antes de executar qualquer binário. As [notas da release v2.0.0](docs/release-notes-v2.0.0.md) trazem mudanças, compatibilidade e instruções de verificação.
 
 ### Compilar do código
 

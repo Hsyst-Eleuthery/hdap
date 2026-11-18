@@ -2,7 +2,7 @@
 
 > **Files with authorship. Memory with proof. A home that does not depend on a single server.**
 
-*Reviewed 2026-11-17 · v2.0.0 (Téleia vási · Teleios).*
+*Reviewed 2026-11-18 · v2.0.0 (Téleia vási · Teleios).*
 
 Hi, I'm **Thaís (op3n/op3ny)**. HDAP started with a simple question: how can we store files so that possession, authorship and history do not depend on a company's goodwill? The answer was not another cloud — it was a protocol small enough to be understood and strong enough to be verified.
 
@@ -33,6 +33,8 @@ Packages for each platform are published in [Releases](https://github.com/Hsyst-
 | Linux x86_64, static (musl) | `hdap-2.0.0-x86_64-unknown-linux-musl.tar.gz` |
 | Linux x86_64, glibc | `hdap-2.0.0-x86_64-unknown-linux-gnu.tar.gz` |
 | Windows x86_64 | `hdap-2.0.0-x86_64-pc-windows-gnu.zip` |
+
+See the [v2.0.0 release notes](docs/release-notes-v2.0.0.md) for changes, compatibility and verification instructions.
 
 ## Quick start (CLI, 5 minutes)
 

@@ -1,6 +1,6 @@
 # Guia de Execução — Compilar, Testar e Empacotar o HDAP
 
-*Revisão de 2026-11-17.*
+*Revisão de 2026-11-18.*
 
 **HDAP v2.0 — Téleia vási · Teleios**
 
@@ -302,7 +302,8 @@ Toda release do HDAP segue a política de **dois codinomes** descrita no [guia d
 3. **Atualize a documentação**: `README.md`, `CHANGELOG.md`, `docs/VERSAO.md` quando a geração mudar, os documentos afetados em `docs/` e as datas de revisão.
 4. **Rode a verificação completa**: `fmt`, `clippy`, `cargo test --workspace` e `cargo audit`.
 5. **Gere os pacotes**: `scripts/cross-release.sh` para cada alvo suportado.
-6. **Confira os checksums** e anexe os arquivos à GitHub Release, nomeando-a com a versão e os dois codinomes.
+6. **Escreva as notas:** use as [notas da release v2.0.0](release-notes-v2.0.0.md) como modelo, cobrindo mudanças, compatibilidade, pacotes e verificação.
+7. **Publique:** crie a tag `v2.0.0` e a GitHub Release nomeada com a versão e os dois codinomes. O job `release` do CI compila os três alvos e anexa os pacotes e os `.sha256`; confira os checksums depois da publicação.
 
 Um lançamento sem changelog, sem codinomes ou sem documentação atualizada não está completo.
 
