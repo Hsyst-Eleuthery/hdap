@@ -1,0 +1,30 @@
+# HDAP — Manifesto de Pins TLS dos Pyles Oficiais
+# Revisão de 2026-11-17 · HDAP v2.0 (Téleia vási · Teleios)
+
+Este documento é assinado pela mantenedora com a chave OpenPGP
+cuja impressão digital é 1489 36AB E859 A3A9 0ED1 E17A 5FF5 3F39 FFC4 D03F.
+
+Para verificar:
+  curl -fsSL 'https://keys.thais.fyi/pks/lookup?op=get&search=thais%40hsyst.org' | gpg --import
+  gpg --verify pins-oficiais-manifesto.txt.asc pins-oficiais-manifesto.txt
+
+Os valores abaixo foram lidos de GET /health (tls_pin) em cada nó oficial
+em 2026-11-17. Confira por um canal independente antes de confiar.
+
+| Endereço | server_id | tls_pin (SHA-256 do DER do certificado TLS) |
+|---|---|---|
+| pyle1.hdap.hsyst.org:8443 | pyle-cHlsZTEuaGRhcC5oc3lzdC5vcmc6ODQ0Mw | e31eea2c5576724d58741ebfe6629065ab15bbfec2725f416280f820f3ccb2e0 |
+| pyle2.hdap.hsyst.org:8444 | pyle-cHlsZTIuaGRhcC5oc3lzdC5vcmc6ODQ0NA | f94f5606d9f0f87a433ebdaa7fc3a9750df72698bc240a4d459286bdeb717f13 |
+| pyle3.hdap.hsyst.org:8445 | pyle-cHlsZTMuaGRhcC5oc3lzdC5vcmc6ODQ0NQ | 01dd1c576af6559bcaf0ecc6590ce8c22518b4ed6f0e4ac5bd90dcc247d41d5f |
+| pyle.thais.fyi:8443 | pyle-cHlsZS50aGFpcy5meWk6ODQ0Mw | c270bafd948dc5bb185009973099702789b3c7f4eea414670a1180b9f9162573 |
+
+As chaves públicas anunciadas por cada nó:
+
+| Endereço | node_sign_pub | node_enc_pub |
+|---|---|---|
+| pyle1.hdap.hsyst.org:8443 | 5a6abe7f69f65dcb15a4b2c9f565a38fc81ab125cba930cac36d33cef7442867 | f9619bc4f8c7888850c03ee39020e975e428e588d206c6ce95373ce0bf6c8f0b |
+| pyle2.hdap.hsyst.org:8444 | 9b008c0800b4639f625448b57f076f58a5911f8ca84848b81f1fefcdf21ec6db | 55f157fe5237fd68249914239ab8d804ff0e923ccb5d5e35be194c9ae763f322 |
+| pyle3.hdap.hsyst.org:8445 | 652623de5c1087a45a18f0ddc2ebc2c5ca48e6bda9ac15c86fc43c1f54e92e02 | 1cacc66936d7cbfc882f847eb231ed149cd5f64083e9f991c392f2dda3212c62 |
+| pyle.thais.fyi:8443 | 7113350e536c39488b4712ca29d704b2974acae0e65dded37cefab01524aeb5d | 306b3cae6b440c24ce00336e4c0d35cf4331a6cf37a0b9f973fd29e68bcad46c |
+
+---fim---

@@ -37,11 +37,15 @@ A mantenedora publica anúncios assinados com a chave OpenPGP cuja impressão di
 1489 36AB E859 A3A9 0ED1 E17A 5FF5 3F39 FFC4 D03F
 ```
 
-A chave está em `https://keys.thais.fyi/pks/lookup?op=get&search=thais%40hsyst.org`. O contato de segurança está em [SECURITY.md](../SECURITY.md) e em [security.txt](../.well-known/security.txt). Para validar um anúncio de pin:
+A chave está em `https://keys.thais.fyi/pks/lookup?op=get&search=thais%40hsyst.org`. O contato de segurança está em [SECURITY.md](../SECURITY.md) e em [security.txt](../.well-known/security.txt).
+
+O manifesto de pins assinado está em [`docs/pins-oficiais-manifesto.txt`](pins-oficiais-manifesto.txt). Para validar:
 
 ```bash
 curl -fsSL 'https://keys.thais.fyi/pks/lookup?op=get&search=thais%40hsyst.org' | gpg --import
-gpg --verify ANUNCIO.asc
+gpg --verify docs/pins-oficiais-manifesto.txt.asc docs/pins-oficiais-manifesto.txt
 ```
+
+O arquivo `.asc` (assinatura OpenPGP separada) deve ser fornecido pela mantenedora.
 
 Ao trocar de nó, repita a leitura de `/health` e compare com esta tabela. Nenhuma listagem derivada de endereço substitui o pin: `pyle-<base64(endereço)>` identifica o nó, mas não autentica o certificado.
