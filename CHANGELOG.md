@@ -91,6 +91,12 @@ Geração **Téleia vási**. Codinome de protocolo: **Teleios**. Codinome de lan
 - **Documentação de release:** README (PT/EN), índice de `docs/`, guia de execução e este changelog passam a apontar para as notas publicadas, com a data de revisão atualizada.
 - **Correção do empacotamento:** `scripts/cross-release.sh` agora descobre o `zig` no `PATH` antes de tentar os caminhos fixos. Sem isso, os alvos musl e Windows falhavam no CI mesmo com o `setup-zig` instalado.
 
+### Correção dos binários Linux (2026-11-18)
+
+- **GLIBC no pacote GNU:** o build passou a usar `cargo zigbuild --target x86_64-unknown-linux-gnu.2.28`, fixando glibc 2.28 como baseline. O artefato anterior exigia `GLIBC_2.43` e não rodava em Ubuntu 24.04 (2.39) nem em Debian 12.
+- **GUI removida do pacote musl:** um binário estático musl não consegue fazer `dlopen` das bibliotecas Wayland/X11 usadas pelo `winit` (`NoWaylandLib` / `Dynamic loading not supported`). O pacote musl agora contém apenas `hdap-server` e `hdap-cli`, com um `AVISO-GUI.txt`; a interface gráfica está no pacote GNU.
+- **Documentação alinhada:** notas da release, README (PT/EN) e guia de execução descrevem qual pacote usar para a GUI, o baseline glibc e o motivo da ausência da GUI no musl.
+
 ## v1.001 — 2026-10-29
 
 Release de correção de interface. Codinome de protocolo: **Themelio** (matriz v1). Codinome de lançamento: **Epoptia**. A matriz de documentos e rotas continua em v1; esta release corrige a avaliação e a edição das permissões (`adeia`).

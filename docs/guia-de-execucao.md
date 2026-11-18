@@ -231,11 +231,11 @@ O script `scripts/cross-release.sh` compila, organiza os arquivos e gera o pacot
 
 Cada execução produz, em `target/release-assets/`:
 
-- uma pasta `<triple>/` com `hdap-server`, `hdap-gui`, `hdap-cli` (ou `.exe`), `LICENSE`, `README.md` e `SHA256SUMS`;
+- uma pasta `<triple>/` com `hdap-server`, `hdap-cli` (ou `.exe`), `LICENSE`, `README.md` e `SHA256SUMS`; `hdap-gui` entra nos pacotes GNU e Windows, mas não no musl;
 - um arquivo `hdap-<versao>-<triple>.tar.gz` (Linux) ou `.zip` (Windows);
 - um `.sha256` do pacote.
 
-O alvo `x86_64-unknown-linux-gnu` usa o compilador nativo; os demais usam Zig. A versão é lida do `Cargo.toml`, salvo se você definir `HDAP_VERSION`.
+Todos os alvos usam Zig como linker. O alvo `x86_64-unknown-linux-gnu` recebe o sufixo `.2.28` internamente, para fixar glibc 2.28 como baseline — um build nativo no runner de CI exigiria glibc 2.43 e falharia em desktops com 2.39. O musl é estático e por isso não consegue fazer `dlopen` das bibliotecas Wayland/X11 do `winit`; `hdap-gui` é omitido e um `AVISO-GUI.txt` explica o motivo dentro do pacote. A versão é lida do `Cargo.toml`, salvo se você definir `HDAP_VERSION`.
 
 ### Verificar os pacotes
 

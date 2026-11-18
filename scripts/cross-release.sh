@@ -11,6 +11,14 @@
 #   ./scripts/cross-release.sh x86_64-unknown-linux-musl
 #   ./scripts/cross-release.sh x86_64-pc-windows-gnu
 #
+# The GNU target is linked against glibc 2.28 (Zig's sysroot) instead of the
+# host glibc. A native build on a recent runner emits GLIBC_2.43 symbols and
+# then fails on ordinary desktops such as Ubuntu 24.04 (glibc 2.39).
+#
+# The musl package is headless by design: a static musl binary cannot dlopen
+# the system Wayland/X11 libraries that winit needs, so hdap-gui is omitted.
+# Use the GNU package for the graphical interface.
+#
 # Output: target/release-assets/<triple>/ plus a compressed archive and
 # SHA-256 checksums next to it. Both the individual binaries and the archive
 # are kept so they can be uploaded to a GitHub release either way.
@@ -34,29 +42,40 @@ find_zig() {
     echo ""
 }
 
+# GNU gets an explicit old glibc baseline; the other targets use the triple
+# as given. Zig is required for every package now, including GNU.
 case "$TARGET" in
-    x86_64-unknown-linux-gnu)
-        echo "==> native build for $TARGET"
-        cargo build --release --manifest-path "$ROOT/Cargo.toml" --workspace --bins
-        BIN_DIR="$ROOT/target/release"
-        ;;
-    *)
-        ZIG="$(find_zig)"
-        if [[ -z "$ZIG" ]]; then
-            echo "error: zig not found (install to ~/.local/zig, see header)" >&2
-            exit 1
-        fi
-        export PATH="$(dirname "$ZIG"):$PATH"
-        echo "==> cross-compiling for $TARGET (zig: $ZIG)"
-        cargo zigbuild --release --manifest-path "$ROOT/Cargo.toml" --target "$TARGET" --workspace --bins
-        BIN_DIR="$ROOT/target/$TARGET/release"
-        ;;
+    x86_64-unknown-linux-gnu) BUILD_TARGET="$TARGET.2.28" ;;
+    *)                        BUILD_TARGET="$TARGET" ;;
 esac
+
+ZIG="$(find_zig)"
+if [[ -z "$ZIG" ]]; then
+    echo "error: zig not found (install to ~/.local/zig, see header)" >&2
+    exit 1
+fi
+export PATH="$(dirname "$ZIG"):$PATH"
+
+echo "==> cross-compiling for $BUILD_TARGET (zig: $ZIG)"
+cargo zigbuild --release --manifest-path "$ROOT/Cargo.toml" --target "$BUILD_TARGET" --workspace --bins
+
+# cargo-zigbuild may keep or strip the glibc suffix in the output directory.
+BIN_DIR="$ROOT/target/$BUILD_TARGET/release"
+if [[ ! -f "$BIN_DIR/hdap-server" ]]; then
+    BIN_DIR="$ROOT/target/${BUILD_TARGET%%.*}/release"
+fi
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
 
-for bin in hdap-server hdap-gui hdap-cli; do
+# Static musl cannot dlopen Wayland/X11, so shipping hdap-gui there would
+# only deliver a binary that always fails on the desktop.
+BINS=(hdap-server hdap-cli)
+if [[ "$TARGET" != *musl* ]]; then
+    BINS+=(hdap-gui)
+fi
+
+for bin in "${BINS[@]}"; do
     src="$BIN_DIR/$bin"
     if [[ -f "$src.exe" ]]; then src="$src.exe"; fi
     case "$TARGET" in
@@ -69,7 +88,25 @@ done
 cp "$ROOT/README.md" "$STAGE/README.md"
 cp "$ROOT/LICENSE" "$STAGE/LICENSE"
 
-(cd "$STAGE" && sha256sum hdap-* > SHA256SUMS)
+if [[ "$TARGET" == *musl* ]]; then
+    cat > "$STAGE/AVISO-GUI.txt" <<'EOF'
+Este pacote musl e estatico e nao inclui hdap-gui. Um binario estatico nao
+consegue carregar as bibliotecas Wayland/X11 do sistema (winit usa dlopen),
+entao a interface grafica sempre falharia com NoWaylandLib / Dynamic loading
+not supported. Use o pacote x86_64-unknown-linux-gnu para a interface grafica.
+
+This static musl package does not include hdap-gui: a static binary cannot
+dlopen the system Wayland/X11 libraries that winit needs. Use the
+x86_64-unknown-linux-gnu package for the graphical interface.
+EOF
+fi
+
+(
+    cd "$STAGE"
+    FILES=(hdap-*)
+    if [[ -f AVISO-GUI.txt ]]; then FILES+=(AVISO-GUI.txt); fi
+    sha256sum "${FILES[@]}" > SHA256SUMS
+)
 
 case "$TARGET" in
     *windows*)

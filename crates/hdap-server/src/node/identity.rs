@@ -2,7 +2,7 @@
 
 use base64::Engine;
 use ed25519_dalek::{Signature as Ed25519Signature, Verifier, VerifyingKey};
-use hdap_core::doc::{parse as parse_doc, DocType};
+use hdap_core::doc::{parse as parse_doc, Doc, DocType};
 use hdap_core::identity::parse_global_id;
 
 use crate::config::Config;
@@ -17,6 +17,82 @@ pub struct IdentityModule {
 impl IdentityModule {
     pub fn new(cfg: Config) -> Self {
         Self { cfg }
+    }
+
+    /// Install a signed prosopeion that changes an existing identity's OTP
+    /// anchor and/or chain length.
+    ///
+    /// The caller must already have verified the document self-signature and
+    /// established ownership — either an authenticated session or the same
+    /// signing key on `POST /register`. The old chain is abandoned, so the
+    /// single-use step floor restarts at 1, exactly like an authenticated
+    /// OMPHALOS rotation. Returns `false` for a no-op or a chain downgrade.
+    fn apply_otp_realign(
+        st: &mut State,
+        user_id: &str,
+        doc: &Doc,
+        sign_pub_hex: String,
+        enc_pub_hex: String,
+        otp_anchor_hex: String,
+        otp_k: usize,
+    ) -> bool {
+        let Some(existing) = st.users.get(user_id).cloned() else {
+            return false;
+        };
+        // A shorter chain would silently discard the steps the owner already
+        // consumed and could be replayed from an old signed prosopeion.
+        if otp_k < existing.otp_k {
+            return false;
+        }
+        if otp_k == existing.otp_k
+            && existing
+                .otp_anchor_hex
+                .eq_ignore_ascii_case(&otp_anchor_hex)
+            && existing.enc_pub_hex == enc_pub_hex
+        {
+            return false;
+        }
+        let current = st
+            .objects
+            .get(&State::key(user_id, "prosopeion.hdap"))
+            .and_then(|b| hdap_core::crypto::aead_open(&st.master_key, &b.bytes).ok())
+            .unwrap_or_default();
+        let next_edition = doc.edition.max(2);
+        let next = {
+            let mut n = doc.clone();
+            n.edition = next_edition;
+            if next_edition > 1 {
+                n.prev_hash = Some(content_hash(&current));
+            }
+            n.render()
+        };
+        let master = st.master_key;
+        st.objects.insert(
+            State::key(user_id, "prosopeion.hdap"),
+            Blob {
+                owner: user_id.to_string(),
+                path: "prosopeion.hdap".into(),
+                hash: content_hash(next.as_bytes()),
+                bytes: hdap_core::crypto::aead_seal(&master, next.as_bytes()),
+            },
+        );
+        st.users.insert(
+            user_id.to_string(),
+            UserRecord {
+                user_id: user_id.to_string(),
+                nickname: existing.nickname,
+                suffix_hex: existing.suffix_hex,
+                sign_pub_hex,
+                enc_pub_hex,
+                otp_anchor_hex,
+                otp_k,
+                created_at: existing.created_at,
+                v2_f3: existing.v2_f3,
+                home_pyle: existing.home_pyle,
+            },
+        );
+        st.omphalos_step.insert(user_id.to_string(), 1);
+        true
     }
 
     /// `POST /register` — register a new identity (prosopeion.hdap).
@@ -98,15 +174,36 @@ impl IdentityModule {
         }
 
         let mut st = node.lock_state();
-        if let Some(existing) = st.users.get(&user_id) {
-            if existing.sign_pub_hex == sign_pub_hex {
-                // Idempotent re-registration: the caller proved possession of
-                // the same key, so answer exactly like the first registration.
+        let existing = st.users.get(&user_id).cloned();
+        if let Some(existing) = existing {
+            if existing.sign_pub_hex != sign_pub_hex {
                 // Random probes with a different key still get a plain 409 and
                 // cannot be used to enumerate which nicknames are taken.
-                return Response::json(201, serde_json::json!({ "user_id": user_id }).to_string());
+                return Response::json(409, json_err("identity key conflict"));
             }
-            return Response::json(409, json_err("identity key conflict"));
+            // The prosopeion self-signature above proves possession of the
+            // same identity key. When a node is restored from an older
+            // database its recorded OMPHALOS can lag behind the client's
+            // vault; re-sending the signed document realigns it without a
+            // session (which the stale anchor would make impossible to get).
+            if otp_k < existing.otp_k {
+                return Response::json(409, json_err("otp chain length cannot decrease"));
+            }
+            let realigned = Self::apply_otp_realign(
+                &mut st,
+                &user_id,
+                &doc,
+                sign_pub_hex,
+                enc_pub_hex,
+                otp_anchor_hex,
+                otp_k,
+            );
+            let body = if realigned {
+                serde_json::json!({ "user_id": user_id, "omphalos": "realigned" })
+            } else {
+                serde_json::json!({ "user_id": user_id })
+            };
+            return Response::json(201, body.to_string());
         }
         let user = UserRecord {
             user_id: user_id.clone(),
@@ -767,55 +864,19 @@ impl IdentityModule {
             auth_module.ensure_hestia(&mut st, &user_id, properties_text, doc.created_at);
             return Ok((user_id, "registered".to_string(), None));
         }
-        let Some(existing) = st.users.get(&user_id).cloned() else {
-            unreachable!("just checked");
-        };
-        if otp_k <= existing.otp_k {
+        let rotated = Self::apply_otp_realign(
+            &mut st,
+            &user_id,
+            &doc,
+            sign_pub_hex,
+            enc_pub_hex,
+            otp_anchor_hex,
+            otp_k,
+        );
+        if !rotated {
             return Ok((user_id, "fresh".to_string(), None));
         }
-        let current = st
-            .objects
-            .get(&State::key(&user_id, "prosopeion.hdap"))
-            .and_then(|b| hdap_core::crypto::aead_open(&st.master_key, &b.bytes).ok())
-            .unwrap_or_default();
-        let next_edition = doc.edition.max(2);
-        let next_text = {
-            let mut n = doc.clone();
-            n.edition = next_edition;
-            if next_edition > 1 {
-                n.prev_hash = Some(content_hash(&current));
-            }
-            n.render()
-        };
-        let master = st.master_key;
-        let key = State::key(&user_id, "prosopeion.hdap");
-        st.objects.insert(
-            key,
-            Blob {
-                owner: user_id.clone(),
-                path: "prosopeion.hdap".into(),
-                hash: content_hash(next_text.as_bytes()),
-                bytes: hdap_core::crypto::aead_seal(&master, next_text.as_bytes()),
-            },
-        );
-        st.users.insert(
-            user_id.clone(),
-            UserRecord {
-                user_id: user_id.clone(),
-                nickname,
-                suffix_hex: suffix,
-                sign_pub_hex,
-                enc_pub_hex,
-                otp_anchor_hex,
-                otp_k,
-                created_at: existing.created_at,
-                v2_f3: true,
-                home_pyle: existing.home_pyle.clone(),
-            },
-        );
-        // Reset OTP floor for new chain
-        st.omphalos_step.insert(user_id.clone(), 1);
-        Ok((user_id, "rotated".to_string(), Some(next_edition)))
+        Ok((user_id, "rotated".to_string(), Some(doc.edition.max(2))))
     }
 }
 
@@ -1034,5 +1095,131 @@ mod house_move_tests {
         let err = m.apply_house_move(&node, &body, None, None).unwrap_err();
         assert_eq!(err.status, 401);
         assert!(node.lock_state().users.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod register_realign_tests {
+    use super::*;
+    use ed25519_dalek::{Signer, SigningKey};
+    use hdap_core::doc::Signature;
+    use serde_json::json;
+
+    fn signed_props(user: &str, suffix: &str, key: &SigningKey, k: usize, anchor: &str) -> String {
+        let pub_hex = hex::encode(key.verifying_key().to_bytes());
+        let mut d = Doc::new(DocType::Prosopeion, 1, None, 1000);
+        d.body.insert("NICKNAME".into(), user.into());
+        d.body.insert("SUFFIX".into(), suffix.into());
+        d.body.insert("SIGN_PUBKEY".into(), pub_hex.clone());
+        d.body.insert("ENC_PUBKEY".into(), "bb".repeat(32));
+        d.body.insert("OMPHALOS".into(), anchor.into());
+        d.body.insert("SEED_ITER".into(), k.to_string());
+        d.body.insert("CREATED".into(), "1000".into());
+        let mut sig = Signature {
+            signer: format!("{user}_{suffix}"),
+            signer_pubkey: Some(pub_hex),
+            signature: String::new(),
+        };
+        d.sigs.push(sig.clone());
+        let input = d.signature_input(0).expect("signable");
+        sig.signature =
+            base64::engine::general_purpose::STANDARD.encode(key.sign(input.as_bytes()).to_bytes());
+        d.sigs[0].signature = sig.signature;
+        d.render()
+    }
+
+    fn register_req(props: &str) -> crate::http::Request {
+        crate::http::Request {
+            method: "POST".into(),
+            path: "/register".into(),
+            query: std::collections::BTreeMap::new(),
+            headers: std::collections::BTreeMap::new(),
+            body: json!({ "properties": props }).to_string().into_bytes(),
+            peer: None,
+        }
+    }
+
+    fn seed_stale(node: &crate::node::Node, uid: &str, key: &SigningKey) {
+        let mut st = node.lock_state();
+        st.users.insert(
+            uid.to_string(),
+            UserRecord {
+                user_id: uid.to_string(),
+                nickname: "thais".into(),
+                suffix_hex: "7c6d0ea2ecf90894".into(),
+                sign_pub_hex: hex::encode(key.verifying_key().to_bytes()),
+                enc_pub_hex: "bb".repeat(32),
+                otp_anchor_hex: "37".repeat(32),
+                otp_k: 1024,
+                created_at: 1000,
+                v2_f3: true,
+                home_pyle: "pyle-old".into(),
+            },
+        );
+        st.omphalos_step.insert(uid.to_string(), 34);
+    }
+
+    #[test]
+    fn reregister_realigns_a_stale_anchor_without_a_session() {
+        let (node, _) = crate::node::Node::with_clock_and_now(Config::default(), 1000);
+        let m = IdentityModule::new(node.cfg.clone());
+        let key = SigningKey::from_bytes(&[9u8; 32]);
+        let uid = "thais_7c6d0ea2ecf90894";
+        seed_stale(&node, uid, &key);
+
+        let anchor = "fd".repeat(32);
+        let props = signed_props("thais", "7c6d0ea2ecf90894", &key, 1025, &anchor);
+        let res = m.handle_register(&node, &register_req(&props));
+        assert_eq!(res.status, 201, "{}", String::from_utf8_lossy(&res.body));
+        assert!(String::from_utf8_lossy(&res.body).contains("realigned"));
+
+        let st = node.lock_state();
+        let user = &st.users[uid];
+        assert_eq!(user.otp_k, 1025);
+        assert_eq!(user.otp_anchor_hex, anchor);
+        assert_eq!(st.omphalos_step[uid], 1, "a new chain starts at step 1");
+        assert_eq!(user.home_pyle, "pyle-old", "a replica keeps its home");
+        assert_eq!(user.created_at, 1000, "registration time is preserved");
+    }
+
+    #[test]
+    fn reregister_never_downgrades_the_chain() {
+        let (node, _) = crate::node::Node::with_clock_and_now(Config::default(), 1000);
+        let m = IdentityModule::new(node.cfg.clone());
+        let key = SigningKey::from_bytes(&[9u8; 32]);
+        let uid = "thais_7c6d0ea2ecf90894";
+        seed_stale(&node, uid, &key);
+        {
+            let mut st = node.lock_state();
+            st.users.get_mut(uid).unwrap().otp_k = 1026;
+        }
+
+        let props = signed_props("thais", "7c6d0ea2ecf90894", &key, 1025, &"fd".repeat(32));
+        let res = m.handle_register(&node, &register_req(&props));
+        assert_eq!(res.status, 409, "{}", String::from_utf8_lossy(&res.body));
+        let st = node.lock_state();
+        assert_eq!(st.users[uid].otp_k, 1026);
+        assert_eq!(st.omphalos_step[uid], 34);
+    }
+
+    #[test]
+    fn reregister_with_another_key_still_conflicts() {
+        let (node, _) = crate::node::Node::with_clock_and_now(Config::default(), 1000);
+        let m = IdentityModule::new(node.cfg.clone());
+        let owner = SigningKey::from_bytes(&[9u8; 32]);
+        let intruder = SigningKey::from_bytes(&[8u8; 32]);
+        let uid = "thais_7c6d0ea2ecf90894";
+        seed_stale(&node, uid, &owner);
+
+        let props = signed_props(
+            "thais",
+            "7c6d0ea2ecf90894",
+            &intruder,
+            1025,
+            &"fd".repeat(32),
+        );
+        let res = m.handle_register(&node, &register_req(&props));
+        assert_eq!(res.status, 409, "{}", String::from_utf8_lossy(&res.body));
+        assert_eq!(node.lock_state().users[uid].otp_k, 1024);
     }
 }

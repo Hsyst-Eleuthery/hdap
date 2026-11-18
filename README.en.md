@@ -28,13 +28,13 @@ This is **v2.0**, the **Téleia vási** generation of the protocol, codenamed **
 
 Packages for each platform are published in [Releases](https://github.com/Hsyst-Eleuthery/hdap/releases). Release **v2.0 (Teleios)** is packaged as `2.0.0`:
 
-| Platform | Artifact |
-|---|---|
-| Linux x86_64, static (musl) | `hdap-2.0.0-x86_64-unknown-linux-musl.tar.gz` |
-| Linux x86_64, glibc | `hdap-2.0.0-x86_64-unknown-linux-gnu.tar.gz` |
-| Windows x86_64 | `hdap-2.0.0-x86_64-pc-windows-gnu.zip` |
+| Platform | Artifact | Contents |
+|---|---|---|
+| Linux x86_64, glibc | `hdap-2.0.0-x86_64-unknown-linux-gnu.tar.gz` | `hdap-server`, `hdap-gui`, `hdap-cli` — **use this one on the Linux desktop** |
+| Linux x86_64, static (musl) | `hdap-2.0.0-x86_64-unknown-linux-musl.tar.gz` | `hdap-server`, `hdap-cli` — headless servers only |
+| Windows x86_64 | `hdap-2.0.0-x86_64-pc-windows-gnu.zip` | `hdap-server.exe`, `hdap-gui.exe`, `hdap-cli.exe` |
 
-See the [v2.0.0 release notes](docs/release-notes-v2.0.0.md) for changes, compatibility and verification instructions.
+The GNU package is linked against glibc **2.28** as its baseline, so it runs on Ubuntu 24.04, Debian 12 and similar distributions. The musl package is static and **does not include the GUI**: a static binary cannot load the Wayland/X11 libraries that the interface needs. See the [v2.0.0 release notes](docs/release-notes-v2.0.0.md) for changes, compatibility and verification instructions.
 
 ## Quick start (CLI, 5 minutes)
 
