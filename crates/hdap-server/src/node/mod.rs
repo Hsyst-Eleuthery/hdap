@@ -96,6 +96,56 @@ pub fn mochthos_challenge(server_id: &str) -> String {
 pub const SERVER_INTEGRITY_TAG: &str = "hdap-server/v2";
 pub const SEAL_OVERHEAD: usize = 12 + 16;
 
+/// Dirty/clean signal for persistence that cannot lose a concurrent update.
+///
+/// An `AtomicBool` is not sufficient: request A can clear the flag while
+/// request B is marking it dirty, silently dropping B's signal. Here
+/// `generation` counts mutations and `persisted` records the generation
+/// covered by the last successful flush. A flush captures the generation
+/// *before* snapshotting state and only advances `persisted` to that captured
+/// value, so any mutation arriving during the flush remains pending for the
+/// next one.
+#[derive(Debug, Default)]
+pub(crate) struct PersistSignal {
+    generation: AtomicU64,
+    persisted: AtomicU64,
+}
+
+impl PersistSignal {
+    /// Mark state as dirty. Call only after the mutation is applied to state,
+    /// so a flush capturing this generation cannot miss that mutation.
+    pub fn mark_dirty(&self) {
+        self.generation.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// True when at least one mutation is not known to be on disk.
+    pub fn needs_flush(&self) -> bool {
+        self.generation.load(Ordering::Acquire) != self.persisted.load(Ordering::Acquire)
+    }
+
+    /// Generation covered by the flush that is about to start.
+    fn begin_flush(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
+    }
+
+    /// Record a successful flush. Never moves `persisted` backwards, so an
+    /// older flush cannot swallow a newer `mark_dirty`.
+    fn end_flush(&self, generation: u64) {
+        let mut current = self.persisted.load(Ordering::Acquire);
+        while generation > current {
+            match self.persisted.compare_exchange_weak(
+                current,
+                generation,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return,
+                Err(actual) => current = actual,
+            }
+        }
+    }
+}
+
 /// A node: owns a `State`, a clock and config; demuxes HTTP requests.
 pub struct Node {
     pub cfg: Config,
@@ -118,10 +168,12 @@ pub struct Node {
     lock_poisoned: AtomicBool,
     /// Unix UTC seconds when this process started (used by Ángelma uptime).
     started_at: u64,
-    /// Set when a factor-1 nonce was consumed by `fed_verify_peer`. Ensures
-    // the nonce consumption is persisted to disk even when the triggering
-    // request is a GET (which otherwise wouldn't trigger a flush).
-    nonce_consumed: AtomicBool,
+    /// Mutations that must reach disk before the request is answered. This
+    /// includes nonce consumption in `fed_verify_peer` (which may happen on a
+    /// GET that later returns 401) and TOFU pins learned during an outbound
+    /// federation call. A generation counter, not a shared bool, so concurrent
+    /// requests cannot erase each other's dirty signal.
+    dirty: PersistSignal,
 
     // Submodules
     auth: AuthModule,
@@ -171,7 +223,7 @@ impl Node {
             db: None,
             advertise_endpoint: None,
             lock_poisoned: AtomicBool::new(false),
-            nonce_consumed: AtomicBool::new(false),
+            dirty: PersistSignal::default(),
             started_at: unix_secs_utc(),
             auth: AuthModule::new(cfg.clone()),
             bandwidth: BandwidthModule::new(cfg.clone()),
@@ -255,19 +307,28 @@ impl Node {
         }
         let mutating = matches!(req.method.as_str(), "POST" | "DELETE" | "PUT");
         let resp = self.dispatch(req);
+        // Mark only after the mutation is in the state: a flush that captures
+        // this generation is then guaranteed to include the change. Marking
+        // before `dispatch` would let a concurrent flush cover a generation
+        // whose mutation had not happened yet, losing that upload.
+        if mutating {
+            self.dirty.mark_dirty();
+        }
         // AME-35: a mutating request is answered only after its effect is on
         // disk. The fingerprint inside `flush` makes a no-op POST cheap, so
         // this stays correct even for read-only POSTs (proklesis, etc.).
-        // AME-XX: nonce consumption (factor-1 challenge) must also persist even
-        // when the triggering request is a GET (e.g. /resolve_hash) and even
-        // when the response is not 2xx (e.g. factor-1 rejected with 401).
-        let should_flush = mutating || self.nonce_consumed.load(Ordering::Relaxed);
-        if should_flush && self.db.is_some() {
+        // AME-XX: nonce consumption by `fed_verify_peer` must also persist,
+        // even on a GET that later returns 401. A TOFU pin learned during an
+        // outbound federation call is dirty too. The generation counter keeps
+        // these signals when several requests race: clearing a bool here
+        // could erase another request's pending write.
+        if crate::fed_client::take_tofu_dirty() {
+            self.dirty.mark_dirty();
+        }
+        if self.dirty.needs_flush() && self.db.is_some() {
             if let Err(e) = self.persist() {
                 return Response::json(500, json_err(&format!("persist failed: {e}")));
             }
-            // Reset the flag so we don't flush unnecessarily on every request.
-            self.nonce_consumed.store(false, Ordering::Relaxed);
         }
         resp
     }
@@ -687,8 +748,41 @@ impl Node {
             }
         }
         drop(st);
+
+        // Pins restored from the database (and any operator-configured pins)
+        // seed the process-wide TOFU registry. Without this, a restarted node
+        // would forget a learned pin and accept a different certificate on the
+        // next outbound connection.
+        let mut seeded: Vec<(String, String)> = {
+            let st = self.lock_state();
+            st.peers
+                .values()
+                .filter_map(|p| Some((p.endpoint.clone(), p.tls_pin.clone()?)))
+                .collect()
+        };
+        seeded.extend(
+            self.cfg
+                .federation_peers
+                .values()
+                .filter_map(|p| Some((p.endpoint.clone(), p.tls_pin.clone()?))),
+        );
+        for (endpoint, pin) in seeded {
+            crate::fed_client::seed_tofu_pin(&endpoint, &pin);
+        }
+
         self.db = Some(db);
         Ok(())
+    }
+
+    /// Copy process-wide TOFU pins into the durable peer records.
+    fn absorb_tofu_pins(&self, st: &mut StoreState) {
+        for (endpoint, pin) in crate::fed_client::learned_tofu_pins() {
+            for peer in st.peers.values_mut() {
+                if peer.endpoint == endpoint && peer.tls_pin.as_deref() != Some(pin.as_str()) {
+                    peer.tls_pin = Some(pin.clone());
+                }
+            }
+        }
     }
 
     /// Persist the current state to the attached database.
@@ -697,8 +791,14 @@ impl Node {
             .db
             .as_ref()
             .ok_or_else(|| crate::db::DbError::Corrupt("no database attached".to_string()))?;
-        let st = self.lock_state();
-        db.flush(&st)
+        // Capture the generation before taking the state lock: a mutation
+        // marked dirty after this point stays pending for the next flush.
+        let generation = self.dirty.begin_flush();
+        let mut st = self.lock_state();
+        self.absorb_tofu_pins(&mut st);
+        db.flush(&st)?;
+        self.dirty.end_flush(generation);
+        Ok(())
     }
 }
 
@@ -1002,5 +1102,72 @@ mod tests {
             "a registered user must survive a restart"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A TOFU pin learned by an outbound client must reach the peer's durable
+    /// record, so a restarted node keeps enforcing it.
+    #[test]
+    fn learned_tofu_pin_is_persisted_in_peer_record() {
+        let dir = std::env::temp_dir().join(format!("hdap-tofu-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("n.db");
+        const ENDPOINT: &str = "203.0.113.19:9443";
+
+        {
+            let db = std::sync::Arc::new(crate::db::Db::open(&path).unwrap());
+            let mut node = Node::new(Config::default());
+            node.with_db(db).unwrap();
+            node.lock_state().peers.insert(
+                "pyle-tofu".into(),
+                crate::store::PeerRecord {
+                    node_id: "pyle-tofu".into(),
+                    sign_pub_hex: "00".repeat(32),
+                    endpoint: ENDPOINT.into(),
+                    tls_pin: None,
+                },
+            );
+            crate::fed_client::seed_tofu_pin(ENDPOINT, "sha256:learnedpin");
+            node.persist().unwrap();
+            assert_eq!(
+                node.lock_state().peers["pyle-tofu"].tls_pin.as_deref(),
+                Some("sha256:learnedpin"),
+                "persist must absorb the learned pin into the peer record"
+            );
+        }
+
+        let back = crate::db::Db::open(&path)
+            .unwrap()
+            .load()
+            .unwrap()
+            .expect("state persisted");
+        assert_eq!(
+            back.peers["pyle-tofu"].tls_pin.as_deref(),
+            Some("sha256:learnedpin")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A concurrent dirty mark must not be swallowed by an in-flight flush.
+    #[test]
+    fn persist_signal_keeps_concurrent_dirty_marks() {
+        let signal = PersistSignal::default();
+        assert!(!signal.needs_flush());
+
+        signal.mark_dirty();
+        let first = signal.begin_flush();
+        assert!(signal.needs_flush());
+
+        // A second request consumes a nonce while the first flush is running.
+        signal.mark_dirty();
+        signal.end_flush(first);
+
+        assert!(
+            signal.needs_flush(),
+            "the second mark must survive the first flush"
+        );
+        let second = signal.begin_flush();
+        signal.end_flush(second);
+        assert!(!signal.needs_flush());
     }
 }

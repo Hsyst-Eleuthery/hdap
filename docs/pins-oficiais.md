@@ -34,15 +34,15 @@ O pin fixado na primeira conexão (TOFU) passa a ser a âncora daquele nó. Se m
 A mantenedora publica anúncios assinados com a chave OpenPGP cuja impressão digital é:
 
 ```
-1489 36AB E859 A3A9 0ED1 E17A 5FF5 3F39 FFC4 D03F
+3D97 B7C2 7095 4A1C 590C 4233 B8E0 166A AB5F 47D8
 ```
 
-A chave está em `https://keys.thais.fyi/pks/lookup?op=get&search=thais%40hsyst.org`. O contato de segurança está em [SECURITY.md](../SECURITY.md) e em [security.txt](../.well-known/security.txt).
+A chave está em `https://keys.thais.fyi/pks/lookup?op=get&search=thais%40github` (identidade `Thaís <thais@github>`). O contato de segurança está em [SECURITY.md](../SECURITY.md) e em [security.txt](../.well-known/security.txt).
 
 O manifesto de pins assinado está em [`docs/pins-oficiais-manifesto.txt`](pins-oficiais-manifesto.txt). Para validar:
 
 ```bash
-curl -fsSL 'https://keys.thais.fyi/pks/lookup?op=get&search=thais%40hsyst.org' | gpg --import
+curl -fsSL 'https://keys.thais.fyi/pks/lookup?op=get&search=thais%40github' | gpg --import
 gpg --verify docs/pins-oficiais-manifesto.txt.asc docs/pins-oficiais-manifesto.txt
 ```
 

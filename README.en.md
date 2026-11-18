@@ -85,7 +85,7 @@ TLS is mandatory outside loopback. Back up `tls.identity`, the master key and th
 | `pyle3.hdap.hsyst.org:8445` | `pyle-cHlsZTMuaGRhcC5oc3lzdC5vcmc6ODQ0NQ` | `01dd1c576af6559bcaf0ecc6590ce8c22518b4ed6f0e4ac5bd90dcc247d41d5f` |
 | `pyle.thais.fyi:8443` | `pyle-cHlsZS50aGFpcy5meWk6ODQ0Mw` | `c270bafd948dc5bb185009973099702789b3c7f4eea414670a1180b9f9162573` |
 
-The pyle id is derived from the announced address; the pin is the SHA-256 of the certificate DER and is what actually authenticates the node. **Verify these pins out of band** before trusting them: [docs/pins-oficiais.md](docs/pins-oficiais.md) has the full table, each node's keys and the maintainer's OpenPGP fingerprint (`1489 36AB E859 A3A9 0ED1 E17A 5FF5 3F39 FFC4 D03F`). Never accept a changed pin without independent confirmation.
+The pyle id is derived from the announced address; the pin is the SHA-256 of the certificate DER and is what actually authenticates the node. **Verify these pins out of band** before trusting them: [docs/pins-oficiais.md](docs/pins-oficiais.md) has the full table, each node's keys and the maintainer's OpenPGP fingerprint (`3D97 B7C2 7095 4A1C 590C 4233 B8E0 166A AB5F 47D8`). Never accept a changed pin without independent confirmation.
 
 ## Verification
 

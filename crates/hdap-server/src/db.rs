@@ -41,10 +41,10 @@ use std::sync::Mutex;
 
 use rusqlite::{params, Connection, OptionalExtension};
 
-use hdap_core::crypto::sha256_hex;
 use crate::store::{
     Cession, MirrorOrigin, PeerRecord, ProklesisRecord, PrytaneionEntry, Session, State, UserRecord,
 };
+use hdap_core::crypto::sha256_hex;
 
 /// Bumped when a collection's shape changes. A node refuses to open a file
 /// written by a newer version rather than silently misreading it.
@@ -562,15 +562,14 @@ impl Db {
                 let tmp_path = self.blob_dir.join(format!(".{}.tmp", b.hash));
                 let mut tmp_file = std::fs::File::create(&tmp_path)
                     .map_err(|e| DbError::Corrupt(format!("cannot write blob temp file: {e}")))?;
-                tmp_file.write_all(&b.bytes).map_err(|e| {
-                    DbError::Corrupt(format!("cannot write blob temp file: {e}"))
-                })?;
-                tmp_file.sync_all().map_err(|e| {
-                    DbError::Corrupt(format!("cannot sync blob temp file: {e}"))
-                })?;
-                std::fs::rename(&tmp_path, &path).map_err(|e| {
-                    DbError::Corrupt(format!("cannot rename blob temp file: {e}"))
-                })?;
+                tmp_file
+                    .write_all(&b.bytes)
+                    .map_err(|e| DbError::Corrupt(format!("cannot write blob temp file: {e}")))?;
+                tmp_file
+                    .sync_all()
+                    .map_err(|e| DbError::Corrupt(format!("cannot sync blob temp file: {e}")))?;
+                std::fs::rename(&tmp_path, &path)
+                    .map_err(|e| DbError::Corrupt(format!("cannot rename blob temp file: {e}")))?;
             }
             // Remove on-disk copies of deleted blobs (best effort). The hash
             // is still in `blob_marks` until we clear it below.

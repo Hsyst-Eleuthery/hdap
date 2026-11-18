@@ -353,7 +353,7 @@ O servidor imprime o pin no stderr e o expõe em `/health`. Em produção, distr
 
 O projeto não pede confiança na maturidade. Ele mostra os testes:
 
-- **267 testes automatizados** (mais um teste manual de integração com nó real);
+- **269 testes automatizados** (mais um teste manual de integração com nó real);
 - testes de dois e três nós para federação, réplica, delete e sucessão;
 - testes de GUI que renderizam a interface em 960×640 e falham se um painel sair da tela;
 - testes de segurança para replay de OTP, pin incorreto, CR isolado, request smuggling e delete de peer não-originário;

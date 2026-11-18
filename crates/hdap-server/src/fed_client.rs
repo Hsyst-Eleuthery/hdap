@@ -33,6 +33,67 @@ pub struct HttpResponse {
     pub body: Vec<u8>,
 }
 
+/// Shared handle for one endpoint's pin. Every client dialing that endpoint
+/// holds a clone, so a pin learned once is enforced by all of them.
+type PinHandle = std::sync::Arc<std::sync::Mutex<Option<String>>>;
+type TofuRegistry = std::sync::Mutex<BTreeMap<String, PinHandle>>;
+
+/// Process-wide TOFU pin registry, keyed by `host:port`.
+///
+/// `FedHttpClient` instances are short-lived and are recreated for every
+/// federation call. Keeping the learned pin here (instead of only inside one
+/// client) means a pin learned by one request is enforced by every later
+/// request to the same endpoint, even when the caller starts from
+/// `tls_pin: None` again. The node copies these pins into `state.peers` on
+/// flush so they also survive a restart.
+fn tofu_registry() -> &'static TofuRegistry {
+    static REGISTRY: std::sync::OnceLock<TofuRegistry> = std::sync::OnceLock::new();
+    REGISTRY.get_or_init(|| std::sync::Mutex::new(BTreeMap::new()))
+}
+
+/// Set when any client learns a new TOFU pin. The node checks this after a
+/// request so the pin is flushed to the database before the caller is told
+/// the request succeeded.
+static TOFU_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Seed the registry with pins restored from `state.peers` (or from the
+/// operator's configuration) so a restarted node keeps enforcing them.
+pub fn seed_tofu_pin(endpoint: &str, pin: &str) {
+    if endpoint.is_empty() || pin.is_empty() {
+        return;
+    }
+    let mut reg = tofu_registry().lock().unwrap_or_else(|p| p.into_inner());
+    let handle = reg
+        .entry(endpoint.to_string())
+        .or_insert_with(|| std::sync::Arc::new(std::sync::Mutex::new(None)))
+        .clone();
+    drop(reg);
+    let mut current = handle.lock().unwrap_or_else(|p| p.into_inner());
+    if current.as_deref() != Some(pin) {
+        *current = Some(pin.to_string());
+    }
+}
+
+/// Snapshot every learned pin so the node can write it into `state.peers`.
+pub fn learned_tofu_pins() -> BTreeMap<String, String> {
+    let reg = tofu_registry().lock().unwrap_or_else(|p| p.into_inner());
+    reg.iter()
+        .filter_map(|(endpoint, handle)| {
+            handle
+                .lock()
+                .ok()
+                .and_then(|g| g.clone())
+                .map(|pin| (endpoint.clone(), pin))
+        })
+        .collect()
+}
+
+/// Consume the "a new pin was learned" signal. Returns true once per learning
+/// event so callers can persist exactly when needed.
+pub fn take_tofu_dirty() -> bool {
+    TOFU_DIRTY.swap(false, std::sync::atomic::Ordering::AcqRel)
+}
+
 /// A plain HTTP/1.1 client targeting a single host:port.
 /// Used by the server to dial peers for blob replication.
 #[derive(Debug, Clone)]
@@ -57,10 +118,22 @@ impl FedHttpClient {
         let port = port_str
             .parse()
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid port"))?;
+        // Reuse the process-wide handle for this endpoint. An operator-supplied
+        // pin is authoritative and overwrites whatever TOFU recorded before;
+        // otherwise a previously learned pin is enforced immediately.
+        let handle = {
+            let mut reg = tofu_registry().lock().unwrap_or_else(|p| p.into_inner());
+            reg.entry(endpoint.to_string())
+                .or_insert_with(|| std::sync::Arc::new(std::sync::Mutex::new(None)))
+                .clone()
+        };
+        if let Some(pin) = tls_pin {
+            *handle.lock().unwrap_or_else(|p| p.into_inner()) = Some(pin);
+        }
         Ok(Self {
             host,
             port,
-            tls_pin: std::sync::Arc::new(std::sync::Mutex::new(tls_pin)),
+            tls_pin: handle,
             connect_timeout: CONNECT_TIMEOUT,
             io_timeout: IO_TIMEOUT,
             peer_tls: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -136,7 +209,12 @@ impl FedHttpClient {
     /// gets the fast plaintext probe (for a `--no-tls` dev node), falling back
     /// to TLS TOFU if that yields no parseable status line.
     fn send(&self, request: &[u8]) -> io::Result<HttpResponse> {
-        if let Some(pin) = self.tls_pin.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
+        if let Some(pin) = self
+            .tls_pin
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+        {
             let tcp = self.connect_tcp()?;
             let mut stream = hdap_tls::connect(
                 tcp,
@@ -184,24 +262,28 @@ impl FedHttpClient {
     /// On the first connection, the presented certificate's pin is accepted and
     /// stored for future connections. On subsequent connections, the stored pin
     /// is enforced so that a changed certificate is rejected (AME-09).
-        /// Dial over TLS accepting the presented certificate (TOFU).
-    ///
-    /// On the first connection, the presented certificate's pin is accepted and
-    /// stored for future connections. On subsequent connections, the stored pin
-    /// is enforced so that a changed certificate is rejected (AME-09).
     fn tls_tofu(&self, request: &[u8]) -> io::Result<HttpResponse> {
         let tcp = self.connect_tcp()?;
-        let pin = self.tls_pin.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        let pin = self
+            .tls_pin
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
         let verifier = hdap_tls::PinVerifier::new(pin.clone());
         let verifier_clone = verifier.clone();
         let mut stream = hdap_tls::connect(tcp, &self.host, verifier)?;
         stream.write_all(request)?;
         stream.flush()?;
-        // If we connected in TOFU mode (no pin configured), record the observed
-        // pin so future connections enforce it.
-        if self.tls_pin.lock().unwrap_or_else(|p| p.into_inner()).is_none() {
-            if let Some(pin) = verifier_clone.observed() {
-                *self.tls_pin.lock().unwrap_or_else(|p| p.into_inner()) = Some(pin);
+        // Record the pin accepted by the verifier in the shared handle so every
+        // later client for this endpoint enforces it. Write only while the
+        // handle is still empty, so two concurrent first connections cannot
+        // overwrite each other's learned pin.
+        if let Some(observed) = verifier_clone.observed() {
+            let mut guard = self.tls_pin.lock().unwrap_or_else(|p| p.into_inner());
+            if guard.is_none() {
+                *guard = Some(observed);
+                drop(guard);
+                TOFU_DIRTY.store(true, std::sync::atomic::Ordering::Release);
             }
         }
         self.read_response(&mut stream)
@@ -518,29 +600,36 @@ mod tests {
         assert_eq!(r.body, b"xyz");
     }
 
-    /// A TOFU pin learned on first connection is persisted and used on
-    /// subsequent connections to the same peer.
+    /// A TOFU pin learned on one client is reused by every later client for
+    /// the same endpoint, even when those clients are created with no pin.
     #[test]
-    fn tls_pin_is_persisted_after_first_tls_connection() {
-        let client = FedHttpClient::new("198.51.100.7:8443", None).unwrap();
+    fn tls_pin_is_reused_by_later_client_instances() {
+        let endpoint = "203.0.113.7:9443";
+        let client = FedHttpClient::new(endpoint, None).unwrap();
         assert!(client.tls_pin.lock().unwrap().is_none(), "no pin initially");
 
-        // Simulate a successful TOFU connection by storing a pin manually
-        // (the actual TLS handshake is tested separately).
-        *client.tls_pin.lock().unwrap_or_else(|p| p.into_inner()) =
-            Some("sha256:abcd1234".into());
+        // Simulate the pin accepted during a first TOFU handshake.
+        seed_tofu_pin(endpoint, "sha256:abcd1234");
+        assert_eq!(
+            client.tls_pin.lock().unwrap().as_deref(),
+            Some("sha256:abcd1234"),
+            "existing client must see the learned pin"
+        );
 
-        // A subsequent connection should use the stored pin.
-        // We verify the pin is now set and would be used:
-        let pin = client.tls_pin.lock().unwrap_or_else(|p| p.into_inner()).clone();
-        assert_eq!(pin, Some("sha256:abcd1234".into()));
+        // A brand-new instance for the same endpoint inherits the learned pin.
+        let client2 = FedHttpClient::new(endpoint, None).unwrap();
+        assert_eq!(
+            client2.tls_pin.lock().unwrap().as_deref(),
+            Some("sha256:abcd1234"),
+            "new client must enforce the pin learned by the old one"
+        );
+        assert!(learned_tofu_pins().contains_key(endpoint));
 
-        // A new client without a pin should NOT have this pin (each client
-        // instance is independent unless shared).
-        let client2 = FedHttpClient::new("198.51.100.7:8443", None).unwrap();
-        assert!(
-            client2.tls_pin.lock().unwrap_or_else(|p| p.into_inner()).is_none(),
-            "new client should not have pin"
+        // An operator-provided pin is authoritative and overrides TOFU.
+        let client3 = FedHttpClient::new(endpoint, Some("sha256:operator".into())).unwrap();
+        assert_eq!(
+            client3.tls_pin.lock().unwrap().as_deref(),
+            Some("sha256:operator")
         );
     }
 }

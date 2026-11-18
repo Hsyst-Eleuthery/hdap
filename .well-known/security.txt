@@ -3,7 +3,7 @@
 Contact: mailto:thais@hsyst.org
 Contact: https://github.com/op3ny
 Expires: 2028-11-17T00:00:00Z
-Encryption: https://keys.thais.fyi/pks/lookup?op=get&search=thais%40hsyst.org
+Encryption: https://keys.thais.fyi/pks/lookup?op=get&search=thais%40github
 Preferred-Languages: pt-BR, en, es, fr
 Canonical: https://github.com/Hsyst-Eleuthery/hdap/blob/main/.well-known/security.txt
 Policy: https://github.com/Hsyst-Eleuthery/hdap/blob/main/SECURITY.md

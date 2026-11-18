@@ -12,7 +12,7 @@ Geração **Téleia vási**. Codinome de protocolo: **Teleios**. Codinome de lan
 
 - Todo tempo de protocolo passou a ser **Unix UTC em segundos** (`u64`). Não há fuso, DST ou offset no fio, e o relógio local do cliente não decide validade: o cliente devolve exatamente o `ts` emitido pelo servidor (`client_ts_matches`, comparação exata).
 - `GET /health` passou a anunciar `protocol_version`, `protocol_codename`, `version`, `time_utc`, `date_utc`, `uptime_secs`, `users`, `files` e `motd`. Toda resposta carrega `X-HDAP-Server-Time`.
-- `Config.time_tolerance_secs` (padrão `300`) ajusta a tolerância de skew **apenas** nas assinaturas de federação; a retenção de nonces continua em `fed_window_secs` (padrão `30`).
+- `Config.time_tolerance_secs` (padrão `300`) ajusta a tolerância de skew **apenas** nas assinaturas de federação; a retenção de nonces usa `fed_window_secs` (padrão `600`, o dobro da tolerância) e o boot rejeita valores menores que `2 × time_tolerance_secs`.
 
 ### Criptografia e autenticação
 
@@ -44,7 +44,7 @@ Geração **Téleia vási**. Codinome de protocolo: **Teleios**. Codinome de lan
 ### Compatibilidade e qualidade
 
 - Cofre local versionado: cabeçalho `HDAPVAULT\0\x02` com parâmetros Argon2 no cabeçalho (padrão 64 MiB/t=2/p=1); cofres v1 (19 MiB/t=2/p=1) continuam legíveis. Limites de sanidade impedem parâmetros absurdos em cofres v2.
-- 267 testes automatizados; novos testes cobrem rotação assinada na CLI e na GUI, F3 vinculado, cofre v1/v2, chave externa, sessões hashadas e exibição da Ángelma.
+- 269 testes automatizados; novos testes cobrem rotação assinada na CLI e na GUI, F3 vinculado, cofre v1/v2, chave externa, sessões hashadas e exibição da Ángelma.
 
 ### Documentação
 
@@ -56,11 +56,11 @@ Geração **Téleia vási**. Codinome de protocolo: **Teleios**. Codinome de lan
 - **Enumeração reduzida no registro:** re-registrar com a **mesma** chave pública é idempotente (retorna `201` como na primeira vez); outra chave para o mesmo `user_id` recebe `409 identity key conflict`, sem revelar se o nome existe.
 - **Teto de desafios configurável:** `--max-challenges N` (padrão `4`) controla `max_proklesis_per_user`, antes fixo.
 - **Zeroização reforçada:** `derive_shared_key` retorna `Zeroizing<[u8; 32]>` e a raiz HKDF da cadeia OTP também é zeroizada; todos os chamadores em núcleo, servidor e CLI foram ajustados.
-- **Pins oficiais publicados:** [docs/pins-oficiais.md](docs/pins-oficiais.md) traz os `tls_pin` reais lidos de `/health`, as chaves de cada nó e a impressão digital OpenPGP `1489 36AB E859 A3A9 0ED1 E17A 5FF5 3F39 FFC4 D03F` para verificação fora da banda. Um manifesto **assinado** depende da chave privada da mantenedora e não é gerado automaticamente.
+- **Pins oficiais publicados:** [docs/pins-oficiais.md](docs/pins-oficiais.md) traz os `tls_pin` reais lidos de `/health`, as chaves de cada nó e a impressão digital OpenPGP `3D97 B7C2 7095 4A1C 590C 4233 B8E0 166A AB5F 47D8` (`Thaís <thais@github>`) para verificação fora da banda. O manifesto **assinado** está em `docs/pins-oficiais-manifesto.txt` com a assinatura separada em `.asc`.
 - **Logging unificado:** todo o startup do servidor usa `hlog!` com níveis e tags; restam apenas os `println!` de `--help`/`--version`. `run.sh` passou a usar arquivos PID em vez de `pkill -f hdap-gui`, e `--motd-file` documenta a regra "last one wins".
 - **Backup guiado:** `hdap-cli init` imprime um aviso `BACK UP NOW` com o caminho do cofre; a GUI exibe o lembrete no momento em que cria a identidade. A documentação esclarece que assinatura prova posse da chave sobre os bytes, **não** criação do conteúdo: `origin_user` registra quem assinou e enviou primeiro, separado de `namespace_owner`.
 - **CI, fuzz e implantação:** cinco alvos de fuzz (documento `.hdap`, request HTTP, `adeia`/permissões, URI `HDAP!` e cofre `krypte.hdap`); CI em Linux/Windows/macOS, `cargo outdated` como aviso e release automático em tags `v*`. Novos `Dockerfile`, `docker-entrypoint.sh`, `docs/hdap-server.service` (systemd) e seção de implantação no guia de execução.
-- **Documentação navegável:** os guia do usuário passaram a se chamar `guia-1-introducao.md` … `guia-6-operacao.md`, com todos os links e âncoras validados; `security.txt` e `.well-known/security.txt` ganharam `Canonical` e `Encryption` corretos; datas de revisão aparecem nos arquivos principais.
+- **Documentação navegável:** os guia do usuário passaram a se chamar `guia-1-introducao.md` … `guia-6-operacao.md`, com todos os links e âncoras validados; `.well-known/security.txt` é a única localização canônica (caminho que a RFC 9116 exige), com `Canonical` e `Encryption` corretos; datas de revisão aparecem nos arquivos principais.
 
 ### Fechamento da revisão (2026-11-18)
 
@@ -68,7 +68,15 @@ Geração **Téleia vási**. Codinome de protocolo: **Teleios**. Codinome de lan
 - **Frase de recuperação vinculada à conta:** a frase BIP-39 (24 palavras com checksum) gera a identidade completa via HKDF-SHA512 com rótulos independentes (`hdap:recovery:sign/enc/otp`). A raiz OTP é gravada no cofre cifrado (`recovery_root`), de modo que perder o `krypte.hdap` não significa perder a conta: `hdap-cli recover <FRASE> <NICK>` reconstrói a identidade. A GUI exibe a frase na criação da identidade e a frase é vinculada à conta (não é sorteada à parte).
 - **Derivação independente por função:** `Identity` ganha o enum `OtpDerivation` (V1/V2/Recovery); `otp_chain_for()` tenta cada derivação e usa a que reproduz o `otp_anchor` armazenado. A raiz do cofre e a raiz OTP são derivadas com rótulos HKDF distintos, preservando a separação entre fator 1 (assinatura) e fator 2 (OTP).
 - **Cofre com raiz de recuperação:** `VaultSecrets` ganha o campo opcional `recovery_root` (zeroizado); o formato de gravação do cofre inclui um byte de flag + 32 bytes opcionais. Cofres antigos (sem a flag) continuam legíveis.
-- **Documentação:** comentário de `mnemonic.rs` corrigido (HKDF-SHA512, não SHA-256); `bip39` movido para as dependências de workspace; contagem de testes atualizada para **261** em todos os documentos.
+- **Documentação:** comentário de `mnemonic.rs` corrigido (HKDF-SHA512, não SHA-256); `bip39` movido para as dependências de workspace; contagem de testes atualizada para **269** em todos os documentos.
+
+### Segunda rodada de auditoria (2026-11-18)
+
+- **TOFU TLS entre instâncias:** o pin aprendido no primeiro contato TLS passou a viver num registro compartilhado por todas as instâncias de `FedHttpClient` (`tofu_registry`, chaveado por `host:port`). Um cliente novo criado com `tls_pin: None` herda o pin já aprendido e volta a rejeitar certificados diferentes. A gravação só ocorre enquanto o handle está vazio, para que duas conexões concorrentes não se sobrescrevam. O nó copia os pins aprendidos para `PeerRecord.tls_pin` no `persist()` e os semeia de volta no registry ao abrir o banco, de modo que a proteção sobrevive a um restart.
+- **Concorrência na persistência:** o `AtomicBool` `nonce_consumed` foi substituído por `PersistSignal`, um par de contadores de geração. O consumo de nonce (inclusive em requisições que terminam em 401/403) marca a geração *depois* de aplicar a mutação; um flush captura a geração antes de tirar o snapshot e só avança o contador persistido até esse valor. Assim, uma requisição concorrente que marca o estado como sujo durante um flush não tem seu sinal apagado.
+- **Integridade dos sidecars de blob:** cada gravação usa arquivo temporário + `fsync` + rename atômico, e a leitura valida tamanho e SHA-256 contra a linha do SQLite antes de preferir o arquivo externo; se o sidecar estiver ausente ou corrompido, o BLOB do SQLite é usado e a cópia externa é reparada no próximo flush.
+- **Duplicação de `security.txt` removida:** resta apenas `.well-known/security.txt`, a localização canônica da RFC 9116.
+- **Testes:** a suíte passou a **269 testes**, com cobertura para reuso do pin TOFU entre instâncias, persistência do pin no registro do peer e concorrência do sinal de persistência. Validação: `cargo fmt --check`, `cargo clippy -D warnings` e `cargo test --workspace`, todos verdes.
 
 ## v1.001 — 2026-10-29
 
