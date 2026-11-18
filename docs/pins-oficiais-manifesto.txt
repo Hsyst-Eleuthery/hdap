@@ -3,8 +3,8 @@
 #
 # Este documento é assinado pela mantenedora com a chave OpenPGP
 # cuja impressão digital é:
-#   1489 36AB E859 A3A9 0ED1 E17A 5FF5 3F39 FFC4 D03F
-# Chave: Thaís <thais@hsyst.org>
+#   3D97 B7C2 7095 4A1C 590C 4233 B8E0 166A AB5F 47D8
+# Chave: Thaís <thais@github>
 #
 # Para verificar a assinatura:
 #   gpg --verify docs/pins-oficiais-manifesto.txt.asc docs/pins-oficiais-manifesto.txt
@@ -29,9 +29,9 @@ As chaves públicas anunciadas por cada nó:
 | pyle.thais.fyi:8443 | 7113350e536c39488b4712ca29d704b2974acae0e65dded37cefab01524aeb5d | 306b3cae6b440c24ce00336e4c0d35cf4331a6cf37a0b9f973fd29e68bcad46c |
 
 Assinado com a chave OpenPGP:
-  Fingerprint: 1489 36AB E859 A3A9 0ED1 E17A 5FF5 3F39 FFC4 D03F
-  Usuário: Thaís <thais@hsyst.org>
-  Chave disponível em: https://keys.thais.fyi/pks/lookup?op=get&search=thais%40hsyst.org
+  Fingerprint: 3D97 B7C2 7095 4A1C 590C 4233 B8E0 166A AB5F 47D8
+  Usuário: Thaís <thais@github>
+  Chave disponível em: https://keys.thais.fyi/pks/lookup?op=get&search=thais%40github
 
 Para assinar este documento:
   gpg --armor --detach-sign --output docs/pins-oficiais-manifesto.txt.asc docs/pins-oficiais-manifesto.txt
