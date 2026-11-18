@@ -39,6 +39,10 @@ pub struct VaultSecrets {
     pub sign_secret: [u8; 32],
     /// X25519 private key (encryption role).
     pub enc_secret: [u8; 32],
+    /// OTP-chain root for recovery-phrase accounts (hdap:recovery:otp
+    /// derivation). Only present when the identity was created from a recovery
+    /// phrase; absent for regular identities. Zeroized on drop.
+    pub recovery_root: Option<[u8; 32]>,
 }
 
 impl VaultSecrets {
@@ -47,6 +51,19 @@ impl VaultSecrets {
             seed: sha256(&sign_key.to_bytes()),
             sign_secret: sign_key.to_bytes(),
             enc_secret: [0u8; 32],
+            recovery_root: None,
+        }
+    }
+
+    /// Build secrets for a recovery-phrase identity. `recovery_root` is the
+    /// 32-byte root used to derive the OTP chain independently of the signing
+    /// key, so factor 2 stays independent of factor 1.
+    pub fn from_recovery(seed: &[u8; 32], recovery_root: &[u8; 32]) -> Self {
+        VaultSecrets {
+            seed: *seed,
+            sign_secret: [0u8; 32],
+            enc_secret: [0u8; 32],
+            recovery_root: Some(*recovery_root),
         }
     }
 }
@@ -56,6 +73,9 @@ impl Drop for VaultSecrets {
         self.seed.zeroize();
         self.sign_secret.zeroize();
         self.enc_secret.zeroize();
+        if let Some(root) = &mut self.recovery_root {
+            root.zeroize();
+        }
     }
 }
 
@@ -69,24 +89,62 @@ pub struct Vault {
 }
 
 fn bundle(secrets: &VaultSecrets) -> Vec<u8> {
-    let mut b = Vec::with_capacity(96);
+    let mut b = Vec::with_capacity(129);
+    b.push(if secrets.recovery_root.is_some() {
+        1
+    } else {
+        0
+    });
     b.extend_from_slice(&secrets.seed);
     b.extend_from_slice(&secrets.sign_secret);
     b.extend_from_slice(&secrets.enc_secret);
+    if let Some(root) = &secrets.recovery_root {
+        b.extend_from_slice(root);
+    }
     b
 }
 
 fn unbundle(b: &[u8]) -> VaultResult<VaultSecrets> {
-    if b.len() != 96 {
+    if b.is_empty() {
         return Err(VaultError::Malformed);
     }
-    let seed: [u8; 32] = b[0..32].try_into().map_err(|_| VaultError::Malformed)?;
-    let sign_secret: [u8; 32] = b[32..64].try_into().map_err(|_| VaultError::Malformed)?;
-    let enc_secret: [u8; 32] = b[64..96].try_into().map_err(|_| VaultError::Malformed)?;
+    let flag = b[0];
+    let mut offset = 1;
+    let seed: [u8; 32] = b
+        .get(offset..offset + 32)
+        .ok_or(VaultError::Malformed)?
+        .try_into()
+        .map_err(|_| VaultError::Malformed)?;
+    offset += 32;
+    let sign_secret: [u8; 32] = b
+        .get(offset..offset + 32)
+        .ok_or(VaultError::Malformed)?
+        .try_into()
+        .map_err(|_| VaultError::Malformed)?;
+    offset += 32;
+    let enc_secret: [u8; 32] = b
+        .get(offset..offset + 32)
+        .ok_or(VaultError::Malformed)?
+        .try_into()
+        .map_err(|_| VaultError::Malformed)?;
+    offset += 32;
+    let recovery_root = if flag == 1 {
+        Some(
+            b.get(offset..offset + 32)
+                .ok_or(VaultError::Malformed)?
+                .try_into()
+                .map_err(|_| VaultError::Malformed)?,
+        )
+    } else if flag == 0 {
+        None
+    } else {
+        return Err(VaultError::Malformed);
+    };
     Ok(VaultSecrets {
         seed,
         sign_secret,
         enc_secret,
+        recovery_root,
     })
 }
 
@@ -232,6 +290,7 @@ mod tests {
             seed: [1u8; 32],
             sign_secret: [2u8; 32],
             enc_secret: [3u8; 32],
+            recovery_root: None,
         };
         let v = Vault::seal_with_salt(&secrets, b"pw", [9u8; 16]);
         let raw = v.to_bytes();
@@ -251,6 +310,7 @@ mod tests {
             seed: [4u8; 32],
             sign_secret: [5u8; 32],
             enc_secret: [6u8; 32],
+            recovery_root: None,
         };
         let v = Vault::seal_with_salt_and_params(&secrets, b"pw", [8u8; 16], ARGON2_PARAMS_V1);
         let mut raw = Vec::new();

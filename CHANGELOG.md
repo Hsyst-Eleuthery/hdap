@@ -44,7 +44,7 @@ Geração **Téleia vási**. Codinome de protocolo: **Teleios**. Codinome de lan
 ### Compatibilidade e qualidade
 
 - Cofre local versionado: cabeçalho `HDAPVAULT\0\x02` com parâmetros Argon2 no cabeçalho (padrão 64 MiB/t=2/p=1); cofres v1 (19 MiB/t=2/p=1) continuam legíveis. Limites de sanidade impedem parâmetros absurdos em cofres v2.
-- 251 testes automatizados; novos testes cobrem rotação assinada na CLI e na GUI, F3 vinculado, cofre v1/v2, chave externa, sessões hashadas e exibição da Ángelma.
+- 261 testes automatizados; novos testes cobrem rotação assinada na CLI e na GUI, F3 vinculado, cofre v1/v2, chave externa, sessões hashadas e exibição da Ángelma.
 
 ### Documentação
 
@@ -61,6 +61,14 @@ Geração **Téleia vási**. Codinome de protocolo: **Teleios**. Codinome de lan
 - **Backup guiado:** `hdap-cli init` imprime um aviso `BACK UP NOW` com o caminho do cofre; a GUI exibe o lembrete no momento em que cria a identidade. A documentação esclarece que assinatura prova posse da chave sobre os bytes, **não** criação do conteúdo: `origin_user` registra quem assinou e enviou primeiro, separado de `namespace_owner`.
 - **CI, fuzz e implantação:** cinco alvos de fuzz (documento `.hdap`, request HTTP, `adeia`/permissões, URI `HDAP!` e cofre `krypte.hdap`); CI em Linux/Windows/macOS, `cargo outdated` como aviso e release automático em tags `v*`. Novos `Dockerfile`, `docker-entrypoint.sh`, `docs/hdap-server.service` (systemd) e seção de implantação no guia de execução.
 - **Documentação navegável:** os guia do usuário passaram a se chamar `guia-1-introducao.md` … `guia-6-operacao.md`, com todos os links e âncoras validados; `security.txt` e `.well-known/security.txt` ganharam `Canonical` e `Encryption` corretos; datas de revisão aparecem nos arquivos principais.
+
+### Fechamento da revisão (2026-11-18)
+
+- **Janela de replay da federação:** `fed_window_secs` elevado de 30 para **600** (o dobro da tolerância de 300 s), de modo que um nonce nunca é esquecido antes de deixar de ser aceito pelo carimbo de tempo. O servidor valida no boot que `fed_window_secs >= time_tolerance_secs`.
+- **Frase de recuperação vinculada à conta:** a frase BIP-39 (24 palavras com checksum) gera a identidade completa via HKDF-SHA512 com rótulos independentes (`hdap:recovery:sign/enc/otp`). A raiz OTP é gravada no cofre cifrado (`recovery_root`), de modo que perder o `krypte.hdap` não significa perder a conta: `hdap-cli recover <FRASE> <NICK>` reconstrói a identidade. A GUI exibe a frase na criação da identidade e a frase é vinculada à conta (não é sorteada à parte).
+- **Derivação independente por função:** `Identity` ganha o enum `OtpDerivation` (V1/V2/Recovery); `otp_chain_for()` tenta cada derivação e usa a que reproduz o `otp_anchor` armazenado. A raiz do cofre e a raiz OTP são derivadas com rótulos HKDF distintos, preservando a separação entre fator 1 (assinatura) e fator 2 (OTP).
+- **Cofre com raiz de recuperação:** `VaultSecrets` ganha o campo opcional `recovery_root` (zeroizado); o formato de gravação do cofre inclui um byte de flag + 32 bytes opcionais. Cofres antigos (sem a flag) continuam legíveis.
+- **Documentação:** comentário de `mnemonic.rs` corrigido (HKDF-SHA512, não SHA-256); `bip39` movido para as dependências de workspace; contagem de testes atualizada para **261** em todos os documentos.
 
 ## v1.001 — 2026-10-29
 

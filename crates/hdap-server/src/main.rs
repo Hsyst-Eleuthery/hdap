@@ -67,6 +67,7 @@ fn print_usage() {
            --max-challenges N  outstanding login challenges per user (default 4)\n  \
            --cleanup-interval N seconds between expiry purges; 0 disables (default 60)\n  \
            --time-tolerance N   federation clock-skew tolerance in seconds (default 300)\n  \
+           --fed-window-secs N  replay-window memory in seconds (default 600, >= tolerance)\n  \
            --federation-peer NODE:PUBKEY:ENDPOINT[:TLS_PIN]  pre-pin a federation peer\n  \
            --help               show usage\n  \
            --version            show version"
@@ -146,6 +147,9 @@ fn parse_args() -> Args {
             }
             "--time-tolerance" => {
                 out.cfg.time_tolerance_secs = parse_value(&mut args, "--time-tolerance")
+            }
+            "--fed-window-secs" => {
+                out.cfg.fed_window_secs = parse_value(&mut args, "--fed-window-secs")
             }
             "--federation-peer" => {
                 let spec = take_value(&mut args, "--federation-peer");
@@ -311,6 +315,23 @@ fn write_key_file(path: &std::path::Path, key: &[u8; 32]) -> Result<(), String> 
 fn main() -> ExitCode {
     hdap_server::log::init();
     let mut args = parse_args();
+
+    // Sanity-check federation timing: the replay-window memory must cover the
+    // full clock-skew tolerance, otherwise a timestamp accepted by skew could
+    // have its nonce already forgotten (replay between tolerance and window).
+    if args.cfg.fed_window_secs < args.cfg.time_tolerance_secs {
+        hdap_server::hlog!(
+            error,
+            "startup",
+            "fed_window_secs ({}) is smaller than time_tolerance_secs ({}); \
+             a timestamp accepted by skew could replay after its nonce is forgotten. \
+             Set --fed-window-secs >= --time-tolerance-secs.",
+            args.cfg.fed_window_secs,
+            args.cfg.time_tolerance_secs
+        );
+        return ExitCode::FAILURE;
+    }
+
     let server_id = args
         .server_id
         .clone()

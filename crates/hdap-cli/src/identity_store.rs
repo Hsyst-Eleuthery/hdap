@@ -7,12 +7,11 @@ use std::io;
 use std::path::Path;
 
 use ed25519_dalek::SigningKey;
-use hdap_core::crypto::{sha256, CryptoError};
+use hdap_core::crypto::CryptoError;
 use hdap_core::doc::{parse, ParseError};
 use hdap_core::identity::Identity;
 use hdap_core::vault::{Vault, VaultError, VaultSecrets};
 use x25519_dalek::StaticSecret;
-
 /// Errors produced while persisting or restoring an identity.
 #[derive(Debug)]
 pub enum IdentityStoreError {
@@ -69,10 +68,19 @@ pub fn save(
     krypte_path: &Path,
     prosopeion_path: &Path,
 ) -> Result<(), IdentityStoreError> {
-    let secrets = VaultSecrets {
-        seed: sha256(&identity.sign_key.to_bytes()),
-        sign_secret: identity.sign_key.to_bytes(),
-        enc_secret: identity.enc_secret.to_bytes(),
+    let secrets = match &identity.recovery_root {
+        Some(root) => VaultSecrets {
+            seed: identity.seed(),
+            sign_secret: identity.sign_key.to_bytes(),
+            enc_secret: identity.enc_secret.to_bytes(),
+            recovery_root: Some(*root),
+        },
+        None => VaultSecrets {
+            seed: identity.seed(),
+            sign_secret: identity.sign_key.to_bytes(),
+            enc_secret: identity.enc_secret.to_bytes(),
+            recovery_root: None,
+        },
     };
     let vault = Vault::seal(&secrets, password);
     std::fs::write(krypte_path, vault.to_bytes())?;
@@ -94,7 +102,12 @@ pub fn load(
     let doc = parse(&prosopeion_text)?;
     let sign_key = SigningKey::from_bytes(&secrets.sign_secret);
     let enc_secret = StaticSecret::from(secrets.enc_secret);
-    Ok(Identity::from_doc(&doc, sign_key, enc_secret)?)
+    Ok(Identity::from_doc(
+        &doc,
+        sign_key,
+        enc_secret,
+        secrets.recovery_root,
+    )?)
 }
 
 /// The next OTP step this client believes the node expects.

@@ -4,7 +4,7 @@
 //! built-in checksum, so a single typo is detected instead of silently
 //! producing a different valid identity. The words are turned into a 64-byte
 //! seed via PBKDF2-HMAC-SHA512 (the standard BIP-39 key stretching), and
-//! every key is then derived independently from that seed with HKDF-SHA256
+//! every key is then derived independently from that seed with HKDF-SHA512
 //! and a distinct label:
 //! `hdap:recovery:sign` (Ed25519 signing), `hdap:recovery:enc` (X25519
 //! encryption), `hdap:recovery:otp` (OTP chain root). No key material is
