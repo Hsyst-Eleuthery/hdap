@@ -89,6 +89,7 @@ Geração **Téleia vási**. Codinome de protocolo: **Teleios**. Codinome de lan
 - **Tag e Release:** a geração Teleios sai como `v2.0.0`, com pacotes para `x86_64-unknown-linux-gnu`, `x86_64-unknown-linux-musl` e `x86_64-pc-windows-gnu`. As [notas da release](docs/release-notes-v2.0.0.md) reúnem mudanças, compatibilidade, downloads e verificação; o workflow de CI anexa os artefatos e os checksums à Release ao publicar a tag.
 - **Auditoria de dependências limpa:** `rusqlite` subiu para `0.41.1` e `libsqlite3-sys` para `0.39.1`, eliminando o CVE do SQLite embutido (RUSTSEC-2026-0459). `cargo audit` passa sem vulnerabilidades; restam apenas avisos informativos de crates `unmaintained`/`yanked`.
 - **Documentação de release:** README (PT/EN), índice de `docs/`, guia de execução e este changelog passam a apontar para as notas publicadas, com a data de revisão atualizada.
+- **Correção do empacotamento:** `scripts/cross-release.sh` agora descobre o `zig` no `PATH` antes de tentar os caminhos fixos. Sem isso, os alvos musl e Windows falhavam no CI mesmo com o `setup-zig` instalado.
 
 ## v1.001 — 2026-10-29
 
